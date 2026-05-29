@@ -34,11 +34,23 @@ services:
       - SECRET_KEY=super-secret-key-change-in-production
       - USE_OLLAMA=false
       - GROQ_API_KEY=
+      - OLLAMA_HOST=http://ollama:11434
     volumes:
       - ./backend:/app
     depends_on:
       db:
         condition: service_healthy
+      ollama:
+        condition: service_started
+    restart: always
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: aireadiness_ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
     restart: always
 
   frontend:
@@ -56,3 +68,4 @@ services:
 
 volumes:
   pgdata:
+  ollama_data:

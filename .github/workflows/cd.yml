@@ -1,0 +1,164 @@
+# ==============================================================================
+# GITHUB ACTIONS CONTINUOUS DEPLOYMENT (CD) PIPELINE
+# File: .github/workflows/cd.yml
+# ==============================================================================
+
+name: Continuous Deployment (CD)
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  packages: write  # Permitted to push packages to GitHub Container Registry (GHCR)
+
+jobs:
+  # ----------------------------------------------------------------------------
+  # JOB 1: COMPILE & PACKAGE MULTI-PLATFORM IMAGES TO GHCR
+  # ----------------------------------------------------------------------------
+  package-and-publish:
+    name: Compile & Package Docker Images
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Setup QEMU for Multi-Platform Emulation
+        uses: docker/setup-qemu-action@v3
+
+      - name: Configure Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log In to GitHub Container Registry (GHCR)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Compile & Publish Backend Image
+      - name: Package & Push Backend Container Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}/backend:latest
+            ghcr.io/${{ github.repository }}/backend:${{ github.sha }}
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}/backend:cache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}/backend:cache,mode=max
+
+      # Compile & Publish Frontend Image
+      - name: Package & Push Frontend Container Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}/frontend:latest
+            ghcr.io/${{ github.repository }}/frontend:${{ github.sha }}
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}/frontend:cache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}/frontend:cache,mode=max
+
+  # ----------------------------------------------------------------------------
+  # JOB 2: DEPLOYMENT TO STAGING / PRODUCTION (MANUAL GATED)
+  # ----------------------------------------------------------------------------
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [package-and-publish]
+    # Manual Gate Check: Requires environment approval configured on GitHub
+    environment:
+      name: production
+      url: http://production.aireadiness.studio
+
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Setup SSH Connection Key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Deploy Containers to Remote Host
+        run: |
+          echo "Connecting to production host ${{ secrets.PRODUCTION_HOST }}..."
+          
+          # Deploy Playbook Execution:
+          # 1. SSH into the remote machine.
+          # 2. Log in to GitHub Container Registry.
+          # 3. Pull new images containing GITHUB_SHA tags.
+          # 4. Re-launch Docker Compose stack with updated tags.
+          # 5. Run database migrations.
+          
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.PRODUCTION_HOST }} << 'EOF'
+            cd /opt/AI-Readiness-Intelligence-Studio
+            
+            # Export environment configurations
+            export DOCKER_IMAGE_TAG=${{ github.sha }}
+            export GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
+            export SECRET_KEY="${{ secrets.SECRET_KEY }}"
+            export GROQ_API_KEY="${{ secrets.GROQ_API_KEY }}"
+            
+            # Login and Pull Images
+            echo $GITHUB_TOKEN | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            docker compose pull backend frontend
+            
+            # Up Stack & Apply Migrations
+            docker compose up -d
+            docker compose exec -T backend alembic upgrade head
+            
+            # Clean up old orphaned layers
+            docker image prune -f
+          EOF
+
+      # ------------------------------------------------------------------------
+      # ALERTS & NOTIFICATIONS
+      # ------------------------------------------------------------------------
+      - name: Notify Slack on Success
+        uses: rtCamp/action-slack-notify@v2
+        if: success()
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_TITLE: "🚀 CD Deployment SUCCESSFUL!"
+          SLACK_COLOR: "#36a64f"
+          SLACK_MESSAGE: "AI Readiness platform successfully deployed to Production! Version Tag: ${{ github.sha }}"
+
+      - name: Notify Slack on Failure
+        uses: rtCamp/action-slack-notify@v2
+        if: failure()
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_TITLE: "🚨 CD Deployment FAILED!"
+          SLACK_COLOR: "#ff0000"
+          SLACK_MESSAGE: "Deploy failed for version ${{ github.sha }}. Action required!"
+
+# ==============================================================================
+# ROLLBACK STRATEGY (PLAYBOOK SPECIFICATION)
+# ==============================================================================
+# In the event of a critical failure or system regression post-deployment, 
+# perform the following quick recovery rollback commands directly via SSH:
+#
+# 1. SSH into the production host:
+#    ssh user@production-host
+#
+# 2. Navigate to deployment folder:
+#    cd /opt/AI-Readiness-Intelligence-Studio
+#
+# 3. Set the previous working tag (e.g. SHA of stable commit):
+#    export DOCKER_IMAGE_TAG=previous_stable_sha
+#
+# 4. Pull and launch the stable containers immediately:
+#    docker compose pull backend frontend
+#    docker compose up -d backend frontend
+#
+# 5. Downgrade database schema if applicable (Alembic rollback):
+#    docker compose exec backend alembic downgrade -1
+# ==============================================================================
