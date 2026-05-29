@@ -53,6 +53,8 @@ init_db()
 
 
 def get_database_health() -> dict:
+    if engine is None:
+        raise RuntimeError("Database engine not initialized")
     with engine.connect() as conn:
         conn.execute(text("SELECT 1"))
 
@@ -64,6 +66,8 @@ def get_database_health() -> dict:
 
 
 def get_db():
+    if SessionLocal is None:
+        raise RuntimeError("Database session not initialized")
     db = SessionLocal()
     try:
         yield db

@@ -297,12 +297,12 @@ def upload_documents(
         file_text = ""
         try:
             content = f.file.read()
-            if f.filename.endswith(".pdf"):
+            if f.filename and f.filename.endswith(".pdf"):
                 logger.info(f"Parsing PDF file: {f.filename}")
                 doc = fitz.open(stream=content, filetype="pdf")
                 for page in doc:
                     file_text += page.get_text()
-            elif f.filename.endswith(".docx"):
+            elif f.filename and f.filename.endswith(".docx"):
                 logger.info(f"Parsing DOCX file: {f.filename}")
                 doc = DocxDocument(io.BytesIO(content))
                 paragraph_text = [

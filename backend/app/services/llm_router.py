@@ -59,7 +59,7 @@ class LLMRouter:
                     "Authorization": f"Bearer {settings.GROQ_API_KEY}",
                     "Content-Type": "application/json",
                 }
-                payload = {
+                payload: dict[str, Any] = {
                     "model": "llama-3.3-70b-versatile",
                     "messages": messages,
                     "temperature": temperature,
@@ -88,7 +88,7 @@ class LLMRouter:
         )
         try:
             url = f"{settings.OLLAMA_HOST}/api/chat"
-            payload = {
+            payload: dict[str, Any] = {
                 "model": model,
                 "messages": messages,
                 "options": {"temperature": temperature},

@@ -1137,10 +1137,10 @@ class DocumentGenerators:
         comm = DocumentGenerators.calculate_commercial_strategy(assessment)
 
         doc.add_paragraph().add_run("Recommended Engagement Model: ").bold = True
-        doc.add_paragraph(comm.get("model"))
+        doc.add_paragraph(comm.get("model", ""))
 
         doc.add_paragraph().add_run("Indicative Investment: ").bold = True
-        doc.add_paragraph(comm.get("pricing_range"))
+        doc.add_paragraph(comm.get("pricing_range", ""))
 
         p_disc = doc.add_paragraph()
         p_disc.paragraph_format.left_indent = Inches(0.4)
@@ -1149,7 +1149,7 @@ class DocumentGenerators:
         ).italic = True
 
         doc.add_paragraph().add_run("Model Rationale: ").bold = True
-        doc.add_paragraph(comm.get("rationale"))
+        doc.add_paragraph(comm.get("rationale", ""))
 
         h_just = doc.add_heading(level=2)
         h_just.add_run("Scoping & Justification Factors")
