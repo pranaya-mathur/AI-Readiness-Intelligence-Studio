@@ -46,7 +46,7 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libpq-dev gcc python3-dev
+          sudo apt-get install -y libpq-dev gcc python3-dev libcairo2-dev pkg-config
 
       - name: Install Quality & App Requirements
         run: |
