@@ -1,7 +1,7 @@
 import io
 import logging
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any
 from xhtml2pdf import pisa
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor
@@ -211,42 +211,36 @@ class DocumentGenerators:
             price_min = 600000
             price_max = 1800000
             rationale = "The client has clear Sales & Pre-sales bottlenecks, highly structured reusable proposal playbooks, and a high-value / low-complexity P1 first pilot opportunity."
-            team_type = "Pilot MVP Build"
         elif avg_score < 50:
             model = "AI Readiness Sprint"
             pilot_name = recommended_pilot
             price_min = 150000
             price_max = 500000
             rationale = f"With an overall AI readiness score of {avg_score}/100, foundational data and alignment gaps should be resolved prior to direct engineering."
-            team_type = "AI Readiness Sprint"
         elif len(compliance_requirements) > 1 and g_score < 50:
             model = "Managed AI Governance Retainer"
             pilot_name = "AI Compliance & Audit Framework"
             price_min = 200000
             price_max = 800000
             rationale = f"Rigid compliance mandates ({', '.join(compliance_requirements)}) and low governance readiness ({g_score}/100) call for ongoing expert oversight."
-            team_type = "Managed AI Governance Retainer"
         elif t_score < 45:
             model = "AI Enablement + Training Program"
             pilot_name = "Enterprise AI Enablement Series"
             price_min = 300000
             price_max = 1200000
             rationale = f"Low team readiness score ({t_score}/100) indicates that human training and pilot adoption gates are key to project success."
-            team_type = "AI Enablement + Training Program"
         elif avg_score > 75 and use_cases_count > 2:
             model = "Production Rollout"
             pilot_name = recommended_pilot
             price_min = 2000000
             price_max = 7500000
             rationale = f"High readiness score ({avg_score}/100) across {dept_count} departments warrants a scalable production deployment of the opportunities catalog."
-            team_type = "Production Rollout"
         else:
             model = "Pilot MVP Build"
             pilot_name = recommended_pilot
             price_min = 600000
             price_max = 1800000
             rationale = "Grounded use cases and solid alignment metrics support launching a practical, low-complexity initial pilot to build organizational trust."
-            team_type = "Pilot MVP Build"
 
         # Calibration adjustments
         base_min = price_min
@@ -854,10 +848,10 @@ class DocumentGenerators:
         
         comm = DocumentGenerators.calculate_commercial_strategy(assessment)
         
-        doc.add_paragraph().add_run(f"Recommended Engagement Model: ").bold = True
+        doc.add_paragraph().add_run("Recommended Engagement Model: ").bold = True
         doc.add_paragraph(comm.get("model"))
         
-        doc.add_paragraph().add_run(f"Indicative Investment: ").bold = True
+        doc.add_paragraph().add_run("Indicative Investment: ").bold = True
         doc.add_paragraph(comm.get("pricing_range"))
         
         p_disc = doc.add_paragraph()

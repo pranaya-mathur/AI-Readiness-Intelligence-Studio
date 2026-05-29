@@ -21,7 +21,7 @@ def init_db():
         postgres_url = settings.DATABASE_URL
         engine = create_engine(postgres_url, connect_args={"connect_timeout": 3})
         # Test connection
-        with engine.connect() as conn:
+        with engine.connect():
             logger.info("Successfully connected to PostgreSQL database.")
         SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     except Exception as e:

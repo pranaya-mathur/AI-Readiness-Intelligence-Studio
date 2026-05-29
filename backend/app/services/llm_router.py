@@ -1,9 +1,8 @@
-import os
 import json
 import logging
 import re
 import requests
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 from app.core.config import settings
 
 logging.basicConfig(level=logging.INFO)
@@ -148,7 +147,7 @@ class LLMRouter:
     def _generate_fallback_response(prompt: str, require_json: bool) -> str:
         """Determining heuristic response to keep code executing in offline conditions"""
         company = _extract_prompt_field(prompt, "Company Name") or _extract_prompt_field(prompt, "Build a 30/60/90 day roadmap containing 3 strategic steps for")
-        industry = _extract_prompt_field(prompt, "Industry")
+        _extract_prompt_field(prompt, "Industry")
         goals = _extract_prompt_field(prompt, "Goals") or _extract_prompt_field(prompt, "Main Goals")
         pain_points = _extract_list(prompt, "Pain Points") or _extract_list(prompt, "Analyze these pain points")
         departments = _extract_list(prompt, "Departments")

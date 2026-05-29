@@ -1,6 +1,5 @@
 import io
 import logging
-import json
 import fitz # PyMuPDF for quick PDF parses
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
@@ -476,8 +475,6 @@ def update_assessment(
     if "readiness_interpretation" not in update_data:
         prefix = "With a consultant-reviewed AI readiness score of"
         overall = ass.overall_score
-        security = ass.security_readiness
-        team = ass.team_readiness
         integration = ass.integration_readiness
         ass.readiness_interpretation = (
             f"{prefix} {int(overall)}/100, the organization appears ready for a controlled pilot rollout, "
@@ -792,11 +789,16 @@ def create_walkthrough_workspace(
         )
     ]
     
-    for item in bottlenecks: db.add(item)
-    for item in use_cases: db.add(item)
-    for item in risks: db.add(item)
-    for item in roadmap: db.add(item)
-    for item in signals: db.add(item)
+    for item in bottlenecks:
+        db.add(item)
+    for item in use_cases:
+        db.add(item)
+    for item in risks:
+        db.add(item)
+    for item in roadmap:
+        db.add(item)
+    for item in signals:
+        db.add(item)
     
     db.commit()
     db.refresh(ass)
