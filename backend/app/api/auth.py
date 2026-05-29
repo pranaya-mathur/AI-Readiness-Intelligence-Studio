@@ -74,7 +74,7 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     # Standard email login
     user = db.query(User).filter(User.email == form_data.username).first()
     
-    # Simple Demo Mode Credentials
+    # Walkthrough Workspace Credentials
     if form_data.username == "demo@studio.com" and form_data.password == "password123":
         # Check if user exists, else seed it
         if not user:

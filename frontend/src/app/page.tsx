@@ -593,7 +593,7 @@ export default function Home() {
       console.error(err);
       setIsProcessing(false);
       clearInterval(stepInterval);
-      alert("AI pipeline encountered a network fallback. Loading default mockup assessment data.");
+      alert("AI pipeline encountered a network fallback. Loading preloaded sample client workspace.");
       // Load seeded demo instead
       loadAssessments();
       setActiveTab("insights");
@@ -1629,8 +1629,8 @@ export default function Home() {
                 <div className="flex items-center gap-1.5 mb-2">
                   <Sparkles className="w-4 h-4 text-blue-400 glow-subtle" />
                   <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Executive Briefing Card</span>
-                  <span className={`rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase ${isDocumentGrounded ? "border-emerald-500/20 bg-emerald-950/20 text-emerald-300" : "border-amber-500/20 bg-amber-950/20 text-amber-300"}`}>
-                    {isDocumentGrounded ? "Document-grounded" : "Demo-mode context"}
+                  <span className={`rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase ${isDocumentGrounded ? "border-emerald-500/20 bg-emerald-950/20 text-emerald-300" : "border-indigo-500/20 bg-indigo-950/20 text-indigo-300"}`}>
+                    {isDocumentGrounded ? "Document-Grounded Evidence" : "Structured Brief Evidence"}
                   </span>
                   <span className={`rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase ${getApprovalStatusBadge(approvalStatus)}`}>
                     {approvalStatus}
@@ -1944,23 +1944,101 @@ export default function Home() {
                           <span className="text-[10px] text-slate-400">Value: <strong className="text-emerald-400">{u.value}</strong></span>
                         </div>
 
-                        <h4 className="text-sm font-bold text-slate-200 mt-2">{u.use_case_name}</h4>
-                        <p className="text-xs text-slate-400 mt-1 leading-relaxed">{u.description}</p>
-                        
-                        {/* Evidence reasoning callout */}
-                        {u.evidence && (
-                          <div className="mt-3 p-3 bg-slate-950 rounded-xl border border-slate-800 text-[10px] text-slate-400 flex flex-col gap-1.5">
-                            <div className="flex items-center gap-1.5 justify-between flex-wrap">
-                              <span className="font-semibold text-slate-300 flex items-center gap-1.5">
-                                <Sparkles className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                                <span>Why this was recommended:</span>
-                              </span>
-                              <span className={`text-[8px] font-extrabold uppercase px-2 py-0.5 rounded border ${isDocumentGrounded ? "border-emerald-500/20 bg-emerald-950/20 text-emerald-300" : "border-indigo-500/20 bg-indigo-950/20 text-indigo-300"}`}>
-                                {isDocumentGrounded ? "Document-Grounded Evidence" : "Structured Brief Evidence"}
-                              </span>
+                        {isReviewMode ? (
+                          <div className="space-y-3 mt-3 pt-3 border-t border-slate-800">
+                            <div>
+                              <label className="block text-[10px] text-slate-500 font-semibold mb-0.5">Opportunity Title</label>
+                              <input 
+                                type="text"
+                                value={u.use_case_name || ""}
+                                onChange={e => {
+                                  const updated = [...selectedAssessment.use_cases];
+                                  updated[idx].use_case_name = e.target.value;
+                                  setSelectedAssessment({ ...selectedAssessment, use_cases: updated });
+                                }}
+                                className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:outline-none"
+                              />
                             </div>
-                            <p className="text-xs text-slate-400 leading-relaxed">{u.evidence}</p>
+                            <div>
+                              <label className="block text-[10px] text-slate-500 font-semibold mb-0.5">Description</label>
+                              <textarea 
+                                value={u.description || ""}
+                                onChange={e => {
+                                  const updated = [...selectedAssessment.use_cases];
+                                  updated[idx].description = e.target.value;
+                                  setSelectedAssessment({ ...selectedAssessment, use_cases: updated });
+                                }}
+                                className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:outline-none h-16"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] text-slate-500 font-semibold mb-0.5">Why this was recommended (Evidence)</label>
+                              <textarea 
+                                value={u.evidence || ""}
+                                onChange={e => {
+                                  const updated = [...selectedAssessment.use_cases];
+                                  updated[idx].evidence = e.target.value;
+                                  setSelectedAssessment({ ...selectedAssessment, use_cases: updated });
+                                }}
+                                className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:outline-none h-16"
+                              />
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className="block text-[10px] text-slate-500 font-semibold mb-0.5">Value</label>
+                                <select 
+                                  value={u.value || "High"}
+                                  onChange={e => {
+                                    const updated = [...selectedAssessment.use_cases];
+                                    updated[idx].value = e.target.value;
+                                    setSelectedAssessment({ ...selectedAssessment, use_cases: updated });
+                                  }}
+                                  className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:outline-none"
+                                >
+                                  <option value="High">High</option>
+                                  <option value="Medium">Medium</option>
+                                  <option value="Low">Low</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label className="block text-[10px] text-slate-500 font-semibold mb-0.5">Complexity</label>
+                                <select 
+                                  value={u.complexity || "Low"}
+                                  onChange={e => {
+                                    const updated = [...selectedAssessment.use_cases];
+                                    updated[idx].complexity = e.target.value;
+                                    setSelectedAssessment({ ...selectedAssessment, use_cases: updated });
+                                  }}
+                                  className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:outline-none"
+                                >
+                                  <option value="High">High</option>
+                                  <option value="Medium">Medium</option>
+                                  <option value="Low">Low</option>
+                                </select>
+                              </div>
+                            </div>
                           </div>
+                        ) : (
+                          <>
+                            <h4 className="text-sm font-bold text-slate-200 mt-2">{u.use_case_name}</h4>
+                            <p className="text-xs text-slate-400 mt-1 leading-relaxed">{u.description}</p>
+                            
+                            {/* Evidence reasoning callout */}
+                            {u.evidence && (
+                              <div className="mt-3 p-3 bg-slate-950 rounded-xl border border-slate-800 text-[10px] text-slate-400 flex flex-col gap-1.5">
+                                <div className="flex items-center gap-1.5 justify-between flex-wrap">
+                                  <span className="font-semibold text-slate-300 flex items-center gap-1.5">
+                                    <Sparkles className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                                    <span>Why this was recommended:</span>
+                                  </span>
+                                  <span className={`text-[8px] font-extrabold uppercase px-2 py-0.5 rounded border ${isDocumentGrounded ? "border-emerald-500/20 bg-emerald-950/20 text-emerald-300" : "border-indigo-500/20 bg-indigo-950/20 text-indigo-300"}`}>
+                                    {isDocumentGrounded ? "Document-Grounded Evidence" : "Structured Brief Evidence"}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-slate-400 leading-relaxed">{u.evidence}</p>
+                              </div>
+                            )}
+                          </>
                         )}
                       </div>
                     ))}
@@ -2075,11 +2153,51 @@ export default function Home() {
                         const { explanation, recommendation } = getReadinessDimensionExplanation(dim.subject, dim.score);
                         return (
                           <div key={dim.key} className="p-4 bg-slate-950/50 border border-slate-800 rounded-xl space-y-2">
-                            <div className="flex items-center justify-between gap-3">
+                            <div className="flex items-center justify-between gap-3 flex-wrap">
                               <span className="text-xs font-bold text-slate-200">{dim.subject}</span>
-                              <span className={`text-xs font-extrabold ${dim.score >= 70 ? "text-emerald-400" : dim.score >= 50 ? "text-blue-400" : "text-amber-500"}`}>
-                                {int(dim.score)}/100
-                              </span>
+                              {isReviewMode ? (
+                                <div className="flex items-center gap-1.5">
+                                  <input 
+                                    type="range"
+                                    min="0"
+                                    max="100"
+                                    value={int(dim.score)}
+                                    onChange={(e) => {
+                                      const val = parseInt(e.target.value, 10);
+                                      const updatedScore = isNaN(val) ? 0 : val;
+                                      const newAssessment = { ...selectedAssessment, [dim.key]: updatedScore };
+                                      // recalculate overall average score dynamically
+                                      const keys = ["data_readiness", "process_readiness", "integration_readiness", "governance_readiness", "security_readiness", "team_readiness", "business_alignment"];
+                                      const avg = Math.round(keys.reduce((acc, k) => acc + int(newAssessment[k as keyof Assessment] as number), 0) / keys.length);
+                                      newAssessment.overall_score = avg;
+                                      setSelectedAssessment(newAssessment);
+                                    }}
+                                    className="w-16 md:w-24 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                                  />
+                                  <input 
+                                    type="number"
+                                    min="0"
+                                    max="100"
+                                    value={int(dim.score)}
+                                    onChange={(e) => {
+                                      let val = parseInt(e.target.value, 10);
+                                      if (isNaN(val)) val = 0;
+                                      if (val > 100) val = 100;
+                                      if (val < 0) val = 0;
+                                      const newAssessment = { ...selectedAssessment, [dim.key]: val };
+                                      const keys = ["data_readiness", "process_readiness", "integration_readiness", "governance_readiness", "security_readiness", "team_readiness", "business_alignment"];
+                                      const avg = Math.round(keys.reduce((acc, k) => acc + int(newAssessment[k as keyof Assessment] as number), 0) / keys.length);
+                                      newAssessment.overall_score = avg;
+                                      setSelectedAssessment(newAssessment);
+                                    }}
+                                    className="w-10 bg-slate-900 border border-slate-700 rounded text-center text-[10px] font-extrabold text-blue-400 focus:outline-none"
+                                  />
+                                </div>
+                              ) : (
+                                <span className={`text-xs font-extrabold ${dim.score >= 70 ? "text-emerald-400" : dim.score >= 50 ? "text-blue-400" : "text-amber-500"}`}>
+                                  {int(dim.score)}/100
+                                </span>
+                              )}
                             </div>
                             <p className="text-[11px] text-slate-400 leading-relaxed">
                               <strong>Status:</strong> {explanation}
@@ -2170,17 +2288,47 @@ export default function Home() {
                     <span className="text-xs uppercase font-extrabold tracking-wider text-blue-400">Recommended First Pilot Proposal</span>
                   </div>
 
-                  <h3 className="text-lg font-bold text-white mb-2">{selectedAssessment.recommended_first_pilot}</h3>
+                  {isReviewMode ? (
+                    <div className="space-y-3 mb-4">
+                      <div>
+                        <label className="block text-[10px] text-slate-400 font-bold uppercase mb-0.5">Pilot Proposal Title</label>
+                        <input 
+                          type="text"
+                          value={selectedAssessment.recommended_first_pilot || ""}
+                          onChange={e => setSelectedAssessment({ ...selectedAssessment, recommended_first_pilot: e.target.value })}
+                          className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:outline-none"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <h3 className="text-lg font-bold text-white mb-2">{selectedAssessment.recommended_first_pilot}</h3>
+                  )}
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                     <div className="p-4 bg-slate-950/50 rounded-xl border border-slate-800">
                       <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Strategic Justification (Why this pilot)</span>
-                      <p className="text-xs text-slate-300 leading-relaxed">{selectedAssessment.why_recommended_pilot}</p>
+                      {isReviewMode ? (
+                        <textarea 
+                          value={selectedAssessment.why_recommended_pilot || ""}
+                          onChange={e => setSelectedAssessment({ ...selectedAssessment, why_recommended_pilot: e.target.value })}
+                          className="w-full h-24 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:outline-none"
+                        />
+                      ) : (
+                        <p className="text-xs text-slate-300 leading-relaxed">{selectedAssessment.why_recommended_pilot}</p>
+                      )}
                     </div>
                     <div className="p-4 bg-slate-950/50 rounded-xl border border-slate-800 flex flex-col justify-between">
                       <div>
                         <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Estimated Impact</span>
-                        <p className="text-xs text-slate-300 leading-relaxed">{selectedAssessment.expected_pilot_impact}</p>
+                        {isReviewMode ? (
+                          <textarea 
+                            value={selectedAssessment.expected_pilot_impact || ""}
+                            onChange={e => setSelectedAssessment({ ...selectedAssessment, expected_pilot_impact: e.target.value })}
+                            className="w-full h-24 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:outline-none"
+                          />
+                        ) : (
+                          <p className="text-xs text-slate-300 leading-relaxed">{selectedAssessment.expected_pilot_impact}</p>
+                        )}
                       </div>
                       <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-[10px]">
                         <span className="text-slate-400">Score confidence:</span>
@@ -2204,10 +2352,39 @@ export default function Home() {
                           {idx + 1}
                         </div>
 
-                        <div className="p-4 bg-slate-900/30 border border-slate-800 hover:border-slate-700 transition-all rounded-xl">
+                        <div className="p-4 bg-slate-900/30 border border-slate-800 hover:border-slate-700 transition-all rounded-xl space-y-2">
                           <span className="text-[10px] font-bold text-blue-400 uppercase tracking-widest">{item.phase}</span>
-                          <h4 className="text-sm font-bold text-slate-200 mt-1">{item.action_item}</h4>
-                          <p className="text-xs text-slate-400 mt-2"><strong>Impact:</strong> {item.expected_impact}</p>
+                          {isReviewMode ? (
+                            <div className="space-y-2 pt-1">
+                              <input 
+                                type="text"
+                                value={item.action_item || ""}
+                                onChange={e => {
+                                  const updated = [...selectedAssessment.roadmap_items];
+                                  updated[idx].action_item = e.target.value;
+                                  setSelectedAssessment({ ...selectedAssessment, roadmap_items: updated });
+                                }}
+                                className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:outline-none"
+                                placeholder="Action Item"
+                              />
+                              <input 
+                                type="text"
+                                value={item.expected_impact || ""}
+                                onChange={e => {
+                                  const updated = [...selectedAssessment.roadmap_items];
+                                  updated[idx].expected_impact = e.target.value;
+                                  setSelectedAssessment({ ...selectedAssessment, roadmap_items: updated });
+                                }}
+                                className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:outline-none"
+                                placeholder="Expected Impact"
+                              />
+                            </div>
+                          ) : (
+                            <>
+                              <h4 className="text-sm font-bold text-slate-200 mt-1">{item.action_item}</h4>
+                              <p className="text-xs text-slate-400 mt-2"><strong>Impact:</strong> {item.expected_impact}</p>
+                            </>
+                          )}
                         </div>
                       </div>
                     ))}

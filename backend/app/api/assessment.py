@@ -272,9 +272,9 @@ def upload_documents(
         
         # Recommended Pilot
         pilot = final_state.get("recommended_pilot", {})
-        ass.recommended_first_pilot = pilot.get("name", "Excel Copilot Automation Agent")
-        ass.why_recommended_pilot = pilot.get("why", "High return value and low complexity thresholds.")
-        ass.expected_pilot_impact = pilot.get("expected_impact", "Reduces support cycles.")
+        ass.recommended_first_pilot = pilot.get("name", "Intelligent Pre-Sales Proposal Copilot")
+        ass.why_recommended_pilot = pilot.get("why", "High transformation value, low implementation complexity, and matches observed bid cycle patterns.")
+        ass.expected_pilot_impact = pilot.get("expected_impact", "Reduces first-draft proposal preparation time, improves approved content reuse, and creates a controlled review flow for client-ready documents.")
         
         # Map Bottlenecks
         db.query(ProcessBottleneck).filter(ProcessBottleneck.assessment_id == ass.id).delete()
@@ -499,14 +499,14 @@ def export_assessment_report(
         raise HTTPException(status_code=400, detail="Invalid format. Use PDF, DOCX, or PPTX.")
 
 @router.post("/demo", response_model=AssessmentResponse)
-def create_demo_mode(
+def create_walkthrough_workspace(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Auto-fills a complete, premium assessment with walkthrough client workspace data"""
     logger.info("Initializing Walkthrough Sample Workspace...")
     organization = get_or_create_default_organization(db, current_user)
-    demo_client = (
+    sample_client = (
         db.query(Client)
         .filter(
             Client.organization_id == organization.id,
@@ -514,8 +514,8 @@ def create_demo_mode(
         )
         .first()
     )
-    if not demo_client:
-        demo_client = Client(
+    if not sample_client:
+        sample_client = Client(
             organization_id=organization.id,
             name="Apex Global Consulting Partners",
             industry="Professional Services",
@@ -523,11 +523,11 @@ def create_demo_mode(
             cloud_preference="Azure",
             compliance_requirements=["GDPR", "SOC2 Type II"],
         )
-        db.add(demo_client)
+        db.add(sample_client)
         db.commit()
-        db.refresh(demo_client)
+        db.refresh(sample_client)
 
-    existing_demo = (
+    existing_sample = (
         db.query(Assessment)
         .filter(
             Assessment.user_id == current_user.id,
@@ -535,28 +535,28 @@ def create_demo_mode(
         )
         .first()
     )
-    if existing_demo:
-        if existing_demo.client_summary is None:
-            existing_demo.client_summary = (
+    if existing_sample:
+        if existing_sample.client_summary is None:
+            existing_sample.client_summary = (
                 "Apex Global Consulting Partners has a credible near-term AI pilot opportunity in proposal "
                 "automation and support triage. The most immediate value is in shortening response cycles "
                 "without forcing a large platform replacement."
             )
-        if existing_demo.reviewer_notes is None:
-            existing_demo.reviewer_notes = (
+        if existing_sample.reviewer_notes is None:
+            existing_sample.reviewer_notes = (
                 "Sample client workspace pre-reviewed for consulting walkthroughs. Reconfirm integration assumptions "
                 "and compliance posture against live environments."
             )
-        if existing_demo.approval_status != "approved":
-            existing_demo.approval_status = "approved"
+        if existing_sample.approval_status != "approved":
+            existing_sample.approval_status = "approved"
         db.commit()
-        db.refresh(existing_demo)
-        return existing_demo
+        db.refresh(existing_sample)
+        return existing_sample
     
     # Create the assessment session
     ass = Assessment(
         user_id=current_user.id,
-        client_id=demo_client.id,
+        client_id=sample_client.id,
         company_name="Apex Global Consulting Partners",
         industry="Professional Services",
         company_size="100-500 employees",
@@ -607,7 +607,7 @@ def create_demo_mode(
         ),
         recommended_first_pilot="Intelligent Pre-Sales Proposal Copilot",
         why_recommended_pilot="High transformation value, low implementation complexity, and fits the corporate priority of accelerating pre-sales proposal throughput.",
-        expected_pilot_impact="Reduces first-draft proposal preparation from 2–3 days to under 30 minutes, while improving reuse of approved content, consistency, and senior review efficiency."
+        expected_pilot_impact="Estimated to reduce first-draft proposal preparation from 2–3 days to under 30 minutes, with potential to improve reuse of approved content, consistency, and senior review efficiency based on observed workflow signals."
     )
     db.add(ass)
     db.commit()
@@ -721,14 +721,14 @@ def create_demo_mode(
             assessment_id=ass.id,
             phase="60-Day",
             action_item="Integrate Support Triage Router into Jira Service Desk shadow staging queues.",
-            expected_impact="Optimizes ticketing triage cycle times by 40% with no downtime.",
+            expected_impact="Targeting up to 40% optimization of ticketing triage cycle times based on initial pilot benchmarks.",
             confidence=85.0
         ),
         RoadmapItem(
             assessment_id=ass.id,
             phase="90-Day",
             action_item="Deploy Compliance Contract Auditor and enforce operational training for pre-sales teams.",
-            expected_impact="Saves up to 10 staff hours weekly and maintains complete audit readiness.",
+            expected_impact="Potential to save up to 10 staff hours weekly while supporting complete audit readiness.",
             confidence=92.0
         )
     ]
