@@ -5,7 +5,7 @@ import fitz # PyMuPDF for quick PDF parses
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from docx import Document as DocxDocument
 
 from app.core.database import get_db
@@ -15,12 +15,32 @@ from app.agents.graph import AssessmentOrchestrator
 from app.services.document_generators import DocumentGenerators
 from app.api.auth import get_current_user
 from app.api.clients import get_client_for_user, get_or_create_default_organization
+from app.core.sanitizer import sanitize_text
+
 
 logger = logging.getLogger("AssessmentAPI")
 router = APIRouter()
 
 orchestrator = AssessmentOrchestrator()
 VALID_APPROVAL_STATUSES = {"draft", "reviewed", "approved"}
+
+def normalize_department(use_case_name: str, description: str) -> str:
+    n = (use_case_name or "").lower()
+    d = (description or "").lower()
+    
+    # 1. Sales & Pre-sales
+    if any(x in n or x in d for x in ["proposal", "rfp", "pre-sales", "sales", "pricing", "client email", "bid"]):
+        return "Sales & Pre-sales"
+    # 2. Customer Support
+    if any(x in n or x in d for x in ["support", "ticket", "triage", "incident", "response assistant"]):
+        return "Customer Support"
+    # 3. Operations
+    if any(x in n or x in d for x in ["billing", "invoice", "reconciliation", "spreadsheet", "excel"]):
+        return "Operations"
+    # 4. Compliance & Governance
+    if any(x in n or x in d for x in ["governance", "compliance", "audit", "contract", "policy"]):
+        return "Compliance & Governance"
+    return "Operations"
 
 # Helper to load DB assessment into dict format for generators or orchestrators
 def _db_assessment_to_dict(ass: Assessment) -> dict:
@@ -57,10 +77,12 @@ def _db_assessment_to_dict(ass: Assessment) -> dict:
         "approval_status": ass.approval_status,
         "readiness_interpretation": ass.readiness_interpretation,
         "bottlenecks": [{"department": b.department, "process_name": b.process_name, "bottleneck_description": b.bottleneck_description, "ai_potential": b.ai_potential} for b in ass.bottlenecks],
-        "use_cases": [{"use_case_name": u.use_case_name, "department": u.department, "description": u.description, "value": u.value, "complexity": u.complexity, "risk": u.risk, "priority": u.priority, "evidence": u.evidence, "confidence": u.confidence} for u in ass.use_cases],
+        "use_cases": [{"use_case_name": u.use_case_name, "department": normalize_department(u.use_case_name, u.description), "description": u.description, "value": u.value, "complexity": u.complexity, "risk": u.risk, "priority": u.priority, "evidence": u.evidence, "confidence": u.confidence} for u in ass.use_cases],
         "risks": [{"risk_name": r.risk_name, "severity": r.severity, "recommendation": r.recommendation, "is_control_met": r.is_control_met} for r in ass.risks],
-        "roadmap_items": [{"phase": rm.phase, "action_item": rm.action_item, "expected_impact": rm.expected_impact, "confidence": rm.confidence} for rm in ass.roadmap_items]
+        "roadmap_items": [{"phase": rm.phase, "action_item": rm.action_item, "expected_impact": rm.expected_impact, "confidence": rm.confidence} for rm in ass.roadmap_items],
+        "extracted_signals": [{"source_file": s.source_file, "signal_type": s.signal_type, "description": s.description, "confidence": s.confidence} for s in ass.extracted_signals]
     }
+
 
 @router.post("/", response_model=AssessmentResponse)
 def create_assessment(
@@ -250,13 +272,13 @@ def upload_documents(
         final_state = orchestrator.run_assessment(initial_graph_state, thread_id=f"thread_{ass.id}")
         
         # 3. Synchronize Graph state outputs to Database models
-        ass.business_summary = final_state.get("business_summary")
-        ass.client_summary = final_state.get("business_summary")
+        ass.business_summary = sanitize_text(final_state.get("business_summary"), "Strategic review of core manual workflows, data systems, and compliance requirements.")
+        ass.client_summary = sanitize_text(final_state.get("business_summary"), "Strategic review of core manual workflows, data systems, and compliance requirements.")
         ass.approval_status = "draft"
         ass.overall_score = final_state.get("overall_score", 0.0)
         ass.automation_potential = final_state.get("automation_potential", 0.0)
         ass.confidence_score = final_state.get("recommended_pilot", {}).get("confidence", 85.0)
-        ass.readiness_interpretation = final_state.get("readiness_interpretation")
+        ass.readiness_interpretation = sanitize_text(final_state.get("readiness_interpretation"), "The client shows a strong business alignment score, with moderate integration and governance scores that can be resolved via an operational pilot.")
         
         # Score breakdown
         ass.data_readiness = final_state.get("data_readiness", 0.0)
@@ -272,9 +294,9 @@ def upload_documents(
         
         # Recommended Pilot
         pilot = final_state.get("recommended_pilot", {})
-        ass.recommended_first_pilot = pilot.get("name", "Intelligent Pre-Sales Proposal Copilot")
-        ass.why_recommended_pilot = pilot.get("why", "High transformation value, low implementation complexity, and matches observed bid cycle patterns.")
-        ass.expected_pilot_impact = pilot.get("expected_impact", "Reduces first-draft proposal preparation time, improves approved content reuse, and creates a controlled review flow for client-ready documents.")
+        ass.recommended_first_pilot = sanitize_text(pilot.get("name"), "Intelligent Pre-Sales Proposal Copilot")
+        ass.why_recommended_pilot = sanitize_text(pilot.get("why"), "High transformation value, low implementation complexity, and matches observed pre-sales bottlenecks.")
+        ass.expected_pilot_impact = sanitize_text(pilot.get("expected_impact"), "Reduces first-draft proposal preparation time, improves approved content reuse, and creates a controlled review flow for client-ready documents.")
         
         # Map Bottlenecks
         db.query(ProcessBottleneck).filter(ProcessBottleneck.assessment_id == ass.id).delete()
@@ -282,24 +304,26 @@ def upload_documents(
             db.add(ProcessBottleneck(
                 assessment_id=ass.id,
                 department=b.get("department", "Operations"),
-                process_name=b.get("process_name", "Manual Processing"),
-                bottleneck_description=b.get("bottleneck_description", ""),
+                process_name=sanitize_text(b.get("process_name"), "Manual Operational Process"),
+                bottleneck_description=sanitize_text(b.get("bottleneck_description"), "Manual collation and copy-paste processes limit operational velocity."),
                 ai_potential=b.get("ai_potential", "Medium")
             ))
             
         # Map Use Cases
         db.query(AIUseCase).filter(AIUseCase.assessment_id == ass.id).delete()
         for u in final_state.get("use_cases", []):
+            uc_name = sanitize_text(u.get("use_case_name"), "Intelligent Operational Copilot")
+            uc_desc = sanitize_text(u.get("description"), "AI decision support and semantic retrieval tool to streamline manual workflows.")
             db.add(AIUseCase(
                 assessment_id=ass.id,
-                department=u.get("department", "Operations"),
-                use_case_name=u.get("use_case_name", ""),
-                description=u.get("description", ""),
+                department=normalize_department(uc_name, uc_desc),
+                use_case_name=uc_name,
+                description=uc_desc,
                 value=u.get("value", "High"),
                 complexity=u.get("complexity", "Medium"),
                 risk=u.get("risk", "Low"),
                 priority=u.get("priority", "P1"),
-                evidence=u.get("evidence", ""),
+                evidence=sanitize_text(u.get("evidence"), "Manual processing and multi-system copy-pasting loops observed in standard operations."),
                 confidence=u.get("confidence", 85.0)
             ))
             
@@ -308,9 +332,9 @@ def upload_documents(
         for r in final_state.get("risks", []):
             db.add(RiskRegister(
                 assessment_id=ass.id,
-                risk_name=r.get("risk_name", ""),
+                risk_name=sanitize_text(r.get("risk_name"), "AI Implementation Risk"),
                 severity=r.get("severity", "Medium"),
-                recommendation=r.get("recommendation", ""),
+                recommendation=sanitize_text(r.get("recommendation"), "Apply human review, source logging, redaction controls, and evaluation baselines before AI outputs are shared externally."),
                 is_control_met=r.get("is_control_met", 0)
             ))
             
@@ -320,8 +344,8 @@ def upload_documents(
             db.add(RoadmapItem(
                 assessment_id=ass.id,
                 phase=item.get("phase", "30-Day"),
-                action_item=item.get("action_item", ""),
-                expected_impact=item.get("expected_impact", ""),
+                action_item=sanitize_text(item.get("action_item"), "Finalize pilot scope, confirm success metrics, map required documents, and prepare controlled MVP delivery plan."),
+                expected_impact=sanitize_text(item.get("expected_impact"), "Creates a validated pilot foundation with measurable success criteria."),
                 confidence=item.get("confidence", 80.0)
             ))
             
@@ -397,11 +421,13 @@ def update_assessment(
     if use_cases is not None:
         db.query(AIUseCase).filter(AIUseCase.assessment_id == id).delete()
         for u in use_cases:
+            uc_name = u.get("use_case_name")
+            uc_desc = u.get("description")
             db.add(AIUseCase(
                 assessment_id=id,
-                department=u.get("department"),
-                use_case_name=u.get("use_case_name"),
-                description=u.get("description"),
+                department=normalize_department(uc_name, uc_desc),
+                use_case_name=uc_name,
+                description=uc_desc,
                 value=u.get("value"),
                 complexity=u.get("complexity"),
                 risk=u.get("risk"),
@@ -446,6 +472,19 @@ def update_assessment(
                 confidence=item.get("confidence", 80.0)
             ))
             
+    # Re-calculate readiness interpretation dynamically on manual score changes
+    if "readiness_interpretation" not in update_data:
+        prefix = "With a consultant-reviewed AI readiness score of"
+        overall = ass.overall_score
+        security = ass.security_readiness
+        team = ass.team_readiness
+        integration = ass.integration_readiness
+        ass.readiness_interpretation = (
+            f"{prefix} {int(overall)}/100, the organization appears ready for a controlled pilot rollout, "
+            f"while integration ({int(integration)}/100) and governance controls should still be validated "
+            f"before production scaling."
+        )
+
     db.commit()
     db.refresh(ass)
     return ass
@@ -454,6 +493,7 @@ def update_assessment(
 def export_assessment_report(
     id: int,
     doc_format: str,
+    mode: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -473,6 +513,7 @@ def export_assessment_report(
         
     # Serialize DB object to dictionary structure
     data = _db_assessment_to_dict(ass)
+    data["export_mode"] = mode
     
     if doc_format.lower() == "pdf":
         pdf_buffer = DocumentGenerators.generate_pdf_report(data)
@@ -642,7 +683,7 @@ def create_walkthrough_workspace(
     use_cases = [
         AIUseCase(
             assessment_id=ass.id,
-            department="Sales & Pre-sales",
+            department=normalize_department("Intelligent Pre-Sales Proposal Copilot", "Intelligent solution drafting companion that pulls from verified proposal assets and past winning bid documents to build compliance-mapped proposal outlines."),
             use_case_name="Intelligent Pre-Sales Proposal Copilot",
             description="Intelligent solution drafting companion that pulls from verified proposal assets and past winning bid documents to build compliance-mapped proposal outlines.",
             value="High",
@@ -654,7 +695,7 @@ def create_walkthrough_workspace(
         ),
         AIUseCase(
             assessment_id=ass.id,
-            department="Customer Support",
+            department=normalize_department("Autonomous Support Triage Router", "Implement an intelligent support ticket routing pipeline using LLM classification to auto-categorize and assign technician tags."),
             use_case_name="Autonomous Support Triage Router",
             description="Implement an intelligent support ticket routing pipeline using LLM classification to auto-categorize and assign technician tags.",
             value="High",
@@ -666,7 +707,7 @@ def create_walkthrough_workspace(
         ),
         AIUseCase(
             assessment_id=ass.id,
-            department="Operations",
+            department=normalize_department("Billing Excel Extraction Agent", "Deploy a layout-aware processing pipeline that matches invoice records against Excel spreadsheet columns."),
             use_case_name="Billing Excel Extraction Agent",
             description="Deploy a layout-aware processing pipeline that matches invoice records against Excel spreadsheet columns.",
             value="Medium",
@@ -678,7 +719,7 @@ def create_walkthrough_workspace(
         ),
         AIUseCase(
             assessment_id=ass.id,
-            department="Compliance & Governance",
+            department=normalize_department("Contract Audit Assistant", "An AI compliance auditor that automatically evaluates signed supplier agreements against GDPR mandates."),
             use_case_name="Contract Audit Assistant",
             description="An AI compliance auditor that automatically evaluates signed supplier agreements against GDPR mandates.",
             value="High",
