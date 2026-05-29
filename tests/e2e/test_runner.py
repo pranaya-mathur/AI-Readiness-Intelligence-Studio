@@ -7,8 +7,11 @@ import docx
 import pptx
 
 API_BASE = "http://localhost:8000/api/v1"
-TEST_PACK_DIR = "/Users/mobcoderid-296/Desktop/AI Readiness Intelligence Studio/AI_Readiness_E2E_Test_Pack 2"
-REPORT_PATH = "/Users/mobcoderid-296/Desktop/AI Readiness Intelligence Studio/tests/e2e/AI_Readiness_E2E_Test_Report_v4.md"
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+TEST_PACK_DIR = os.path.join(_REPO_ROOT, "AI_Readiness_E2E_Test_Pack 2")
+REPORT_PATH = os.path.join(
+    _REPO_ROOT, "tests", "e2e", "AI_Readiness_E2E_Test_Report_v4.md"
+)
 
 
 def print_header(title):
@@ -504,7 +507,9 @@ def main():
 
             out_filename = f"apex_test_export.{fmt}"
             out_path = os.path.join(
-                "/Users/mobcoderid-296/Desktop/AI Readiness Intelligence Studio/tests/e2e",
+                _REPO_ROOT,
+                "tests",
+                "e2e",
                 out_filename,
             )
             with open(out_path, "wb") as out_f:
@@ -534,7 +539,9 @@ def main():
 
             out_filename = f"apex_showcase_export.{fmt}"
             out_path = os.path.join(
-                "/Users/mobcoderid-296/Desktop/AI Readiness Intelligence Studio/tests/e2e",
+                _REPO_ROOT,
+                "tests",
+                "e2e",
                 out_filename,
             )
             with open(out_path, "wb") as out_f:
