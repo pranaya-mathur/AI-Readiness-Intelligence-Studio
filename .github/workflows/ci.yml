@@ -62,8 +62,9 @@ jobs:
 
       - name: Execute Mypy Static Type Analysis
         run: |
-          # Create a custom config for mypy if needed, or check app module
-          mypy --ignore-missing-imports backend/app
+          # Use explicit-package-bases so mypy resolves backend.app.api.assessment
+          # and backend.app.schemas.assessment as distinct modules
+          MYPYPATH=. mypy --ignore-missing-imports --explicit-package-bases backend/app
 
   # ----------------------------------------------------------------------------
   # JOB 2: FRONTEND QUALITY ASSURANCE & PRODUCTION BUILD
