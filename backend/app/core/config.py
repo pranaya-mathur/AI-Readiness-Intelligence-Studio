@@ -2,6 +2,7 @@ import os
 from pydantic_settings import BaseSettings
 from typing import List, Optional
 
+
 def _parse_cors_origins() -> List[str]:
     raw_value = os.getenv("CORS_ORIGINS")
     if raw_value:
@@ -13,6 +14,7 @@ def _parse_cors_origins() -> List[str]:
         "http://localhost:3001",
         "http://127.0.0.1:3001",
     ]
+
 
 class Settings(BaseSettings):
     # App General Config
@@ -30,7 +32,7 @@ class Settings(BaseSettings):
     POSTGRES_DB: str = os.getenv("POSTGRES_DB", "aireadiness")
     POSTGRES_HOST: str = os.getenv("POSTGRES_HOST", "db")
     POSTGRES_PORT: str = os.getenv("POSTGRES_PORT", "5432")
-    
+
     # Base connection URLs
     @property
     def DATABASE_URL(self) -> str:
@@ -38,7 +40,7 @@ class Settings(BaseSettings):
         if database_url_override:
             return database_url_override
         return f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
-        
+
     SQLITE_URL: str = os.getenv("SQLITE_URL", "sqlite:///./aireadiness.db")
 
     # LLM Settings
@@ -48,16 +50,25 @@ class Settings(BaseSettings):
 
     # Model preferences
     PRIMARY_LLM: str = "groq/llama-3.3-70b-versatile"
-    
+
     # Ollama Catalog mappings
-    OLLAMA_REASONING_MODEL: str = os.getenv("OLLAMA_REASONING_MODEL", "qwen3.5:9b")  # fallback: llama3:8b
-    OLLAMA_STRUCTURED_MODEL: str = os.getenv("OLLAMA_STRUCTURED_MODEL", "qwen2.5-coder:14b")
-    OLLAMA_LIGHTWEIGHT_MODEL: str = os.getenv("OLLAMA_LIGHTWEIGHT_MODEL", "phi3.5:latest")
-    
+    OLLAMA_REASONING_MODEL: str = os.getenv(
+        "OLLAMA_REASONING_MODEL", "qwen3.5:9b"
+    )  # fallback: llama3:8b
+    OLLAMA_STRUCTURED_MODEL: str = os.getenv(
+        "OLLAMA_STRUCTURED_MODEL", "qwen2.5-coder:14b"
+    )
+    OLLAMA_LIGHTWEIGHT_MODEL: str = os.getenv(
+        "OLLAMA_LIGHTWEIGHT_MODEL", "phi3.5:latest"
+    )
+
     # Embeddings config
-    OLLAMA_EMBEDDING_MODEL: str = os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text:latest") # fallback: qwen3-embedding:8b
+    OLLAMA_EMBEDDING_MODEL: str = os.getenv(
+        "OLLAMA_EMBEDDING_MODEL", "nomic-embed-text:latest"
+    )  # fallback: qwen3-embedding:8b
 
     class Config:
         case_sensitive = True
+
 
 settings = Settings()

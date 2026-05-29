@@ -1,0 +1,20 @@
+Apex Operations Billing Reconciliation Workflow - Synthetic Test Data
+
+Current Process:
+1. Delivery teams export weekly time entries from project trackers.
+2. Finance downloads Excel logs and manually maps hours against invoice templates.
+3. Client-specific billing terms are checked in historic proposal documents.
+4. Exceptions are escalated over Slack and email.
+5. Final invoice notes are reviewed by operations manager.
+
+Pain Points:
+- Manual spreadsheet mapping takes 6-8 staff hours per week.
+- Billing descriptions are inconsistent across clients.
+- Contract terms are checked manually and sometimes missed.
+- Commercial figures cannot be generated directly by AI without human validation.
+
+AI Opportunity:
+Billing Excel Extraction Agent can extract rows, normalize labels, compare against contract terms, and produce discrepancy summaries. It should remain a decision-support assistant, not an autonomous billing engine.
+
+Governance Requirement:
+Any billing-related output below 95% confidence must be escalated to finance review. All source documents and assumptions must be visible in the evidence trail.

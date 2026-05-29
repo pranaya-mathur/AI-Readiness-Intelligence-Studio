@@ -23,10 +23,7 @@ except Exception as e:
 
 # 2. Initialize FastAPI Application
 app = FastAPI(
-    title=settings.PROJECT_NAME,
-    version="1.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc"
+    title=settings.PROJECT_NAME, version="1.0.0", docs_url="/docs", redoc_url="/redoc"
 )
 
 # 3. Configure CORS Policies for local Next.js client
@@ -39,9 +36,16 @@ app.add_middleware(
 )
 
 # 4. Mount API Routes
-app.include_router(auth_router, prefix=f"{settings.API_V1_STR}/auth", tags=["Authentication"])
-app.include_router(clients_router, prefix=f"{settings.API_V1_STR}/clients", tags=["Clients"])
-app.include_router(assessment_router, prefix=f"{settings.API_V1_STR}/assessments", tags=["Assessments"])
+app.include_router(
+    auth_router, prefix=f"{settings.API_V1_STR}/auth", tags=["Authentication"]
+)
+app.include_router(
+    clients_router, prefix=f"{settings.API_V1_STR}/clients", tags=["Clients"]
+)
+app.include_router(
+    assessment_router, prefix=f"{settings.API_V1_STR}/assessments", tags=["Assessments"]
+)
+
 
 @app.get("/")
 def read_root():
@@ -49,8 +53,9 @@ def read_root():
         "status": "online",
         "service": settings.PROJECT_NAME,
         "tagline": "From business documents to AI opportunity roadmap in minutes.",
-        "orchestrator": "LangGraph Stateful Engine Active"
+        "orchestrator": "LangGraph Stateful Engine Active",
     }
+
 
 @app.get("/healthz")
 def healthz():
@@ -59,6 +64,7 @@ def healthz():
         "service": settings.PROJECT_NAME,
         "environment": settings.ENVIRONMENT,
     }
+
 
 @app.get("/readyz")
 def readyz():
@@ -71,7 +77,10 @@ def readyz():
             **db_health,
         }
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"Database readiness check failed: {exc}") from exc
+        raise HTTPException(
+            status_code=503, detail=f"Database readiness check failed: {exc}"
+        ) from exc
+
 
 if __name__ == "__main__":
     uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)

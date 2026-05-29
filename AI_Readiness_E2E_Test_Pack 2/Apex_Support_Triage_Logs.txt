@@ -1,0 +1,28 @@
+Apex Customer Support Triage Log - Synthetic Test Data
+
+System: Jira Service Desk
+Period: Sample Week
+
+Ticket A-1042
+Client: Redacted Healthcare Client
+Issue: Data sync failure between Salesforce export and delivery dashboard.
+Current routing: Manually reviewed by support coordinator, then assigned to integration engineer after 3.5 hours.
+AI opportunity: classify integration failures, assign priority, draft first response, and flag missing logs.
+Risk: generated responses must be reviewed before sending.
+
+Ticket A-1051
+Client: Redacted BFSI Client
+Issue: User access request for archived compliance proposal folder.
+Current routing: support checks SharePoint permissions manually.
+AI opportunity: recommend routing to IAM/admin team, summarize requester context, and identify access-control risk.
+Risk: permission changes must remain human-approved.
+
+Ticket A-1059
+Client: Redacted Retail Client
+Issue: Confusion about billing line items from timesheet exports.
+Current routing: support forwards to operations; operations manually reconciles Excel timesheet and invoice template.
+AI opportunity: extract invoice rows, compare against timesheet export, and prepare discrepancy summary.
+Risk: billing claims require confidence threshold above 95% and finance approval.
+
+Observed Pattern:
+Support tickets are manually classified and routed. Initial tagging delay ranges from 2 to 5 hours. A support triage assistant could classify category, urgency, department owner, and draft a response with confidence score and escalation rules.

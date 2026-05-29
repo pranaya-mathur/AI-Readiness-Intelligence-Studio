@@ -2,12 +2,15 @@ from typing import List, Optional
 from pydantic import BaseModel, EmailStr
 from datetime import datetime
 
+
 # --- Auth Schemas ---
 class UserBase(BaseModel):
     email: EmailStr
 
+
 class UserCreate(UserBase):
     password: str
+
 
 class UserResponse(UserBase):
     id: int
@@ -17,9 +20,11 @@ class UserResponse(UserBase):
     class Config:
         from_attributes = True
 
+
 class Token(BaseModel):
     access_token: str
     token_type: str
+
 
 class TokenData(BaseModel):
     email: Optional[str] = None
@@ -32,8 +37,10 @@ class BottleneckBase(BaseModel):
     bottleneck_description: str
     ai_potential: str
 
+
 class BottleneckCreate(BottleneckBase):
     pass
+
 
 class BottleneckResponse(BottleneckBase):
     id: int
@@ -41,6 +48,7 @@ class BottleneckResponse(BottleneckBase):
 
     class Config:
         from_attributes = True
+
 
 class UseCaseBase(BaseModel):
     department: str
@@ -53,8 +61,10 @@ class UseCaseBase(BaseModel):
     evidence: Optional[str] = None
     confidence: float = 85.0
 
+
 class UseCaseCreate(UseCaseBase):
     pass
+
 
 class UseCaseResponse(UseCaseBase):
     id: int
@@ -63,14 +73,17 @@ class UseCaseResponse(UseCaseBase):
     class Config:
         from_attributes = True
 
+
 class RiskBase(BaseModel):
     risk_name: str
     severity: str
     recommendation: str
     is_control_met: int = 0
 
+
 class RiskCreate(RiskBase):
     pass
+
 
 class RiskResponse(RiskBase):
     id: int
@@ -79,14 +92,17 @@ class RiskResponse(RiskBase):
     class Config:
         from_attributes = True
 
+
 class RoadmapBase(BaseModel):
     phase: str
     action_item: str
     expected_impact: str
     confidence: float = 80.0
 
+
 class RoadmapCreate(RoadmapBase):
     pass
+
 
 class RoadmapResponse(RoadmapBase):
     id: int
@@ -95,11 +111,13 @@ class RoadmapResponse(RoadmapBase):
     class Config:
         from_attributes = True
 
+
 class SignalBase(BaseModel):
     source_file: str
     signal_type: str
     description: str
     confidence: float = 90.0
+
 
 class SignalResponse(SignalBase):
     id: int
@@ -108,6 +126,7 @@ class SignalResponse(SignalBase):
     class Config:
         from_attributes = True
 
+
 class ClientBase(BaseModel):
     name: str
     industry: Optional[str] = None
@@ -115,8 +134,10 @@ class ClientBase(BaseModel):
     cloud_preference: Optional[str] = None
     compliance_requirements: List[str] = []
 
+
 class ClientCreate(ClientBase):
     pass
+
 
 class ClientResponse(ClientBase):
     id: int
@@ -141,6 +162,7 @@ class AssessmentCreate(BaseModel):
     pain_points: List[str] = []
     ai_goals: List[str] = []
 
+
 class AssessmentUpdate(BaseModel):
     # Allows Human Review Mode overrides
     client_id: Optional[int] = None
@@ -152,7 +174,7 @@ class AssessmentUpdate(BaseModel):
     confidence_score: Optional[float] = None
     risk_level: Optional[str] = None
     status: Optional[str] = None
-    
+
     # Custom score overrides
     data_readiness: Optional[float] = None
     process_readiness: Optional[float] = None
@@ -161,7 +183,7 @@ class AssessmentUpdate(BaseModel):
     security_readiness: Optional[float] = None
     team_readiness: Optional[float] = None
     business_alignment: Optional[float] = None
-    
+
     # Interpretation text overrides
     business_summary: Optional[str] = None
     readiness_interpretation: Optional[str] = None
@@ -178,6 +200,7 @@ class AssessmentUpdate(BaseModel):
     risks: Optional[List[RiskBase]] = None
     roadmap_items: Optional[List[RoadmapBase]] = None
 
+
 class AssessmentResponse(BaseModel):
     id: int
     client_id: Optional[int]
@@ -191,7 +214,7 @@ class AssessmentResponse(BaseModel):
     main_business_goals: Optional[str]
     pain_points: Optional[List[str]]
     ai_goals: Optional[List[str]]
-    
+
     overall_score: float
     automation_potential: float
     confidence_score: float
@@ -200,7 +223,7 @@ class AssessmentResponse(BaseModel):
     recommended_first_pilot: Optional[str]
     why_recommended_pilot: Optional[str]
     expected_pilot_impact: Optional[str]
-    
+
     data_readiness: float
     process_readiness: float
     integration_readiness: float
@@ -208,16 +231,16 @@ class AssessmentResponse(BaseModel):
     security_readiness: float
     team_readiness: float
     business_alignment: float
-    
+
     business_summary: Optional[str]
     readiness_interpretation: Optional[str]
     client_summary: Optional[str]
     reviewer_notes: Optional[str]
     approval_status: Optional[str]
-    
+
     created_at: datetime
     updated_at: datetime
-    
+
     bottlenecks: List[BottleneckResponse] = []
     use_cases: List[UseCaseResponse] = []
     risks: List[RiskResponse] = []

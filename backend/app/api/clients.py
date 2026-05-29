@@ -32,7 +32,9 @@ def get_or_create_default_organization(db: Session, current_user: User) -> Organ
     return organization
 
 
-def get_client_for_user(db: Session, current_user: User, client_id: int) -> Client | None:
+def get_client_for_user(
+    db: Session, current_user: User, client_id: int
+) -> Client | None:
     return (
         db.query(Client)
         .join(Organization, Client.organization_id == Organization.id)
@@ -95,7 +97,9 @@ def delete_client(
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
-    linked_assessment_count = db.query(Assessment).filter(Assessment.client_id == client.id).count()
+    linked_assessment_count = (
+        db.query(Assessment).filter(Assessment.client_id == client.id).count()
+    )
     if linked_assessment_count > 0:
         raise HTTPException(
             status_code=400,

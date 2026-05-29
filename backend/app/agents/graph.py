@@ -12,16 +12,17 @@ from app.agents.nodes.agent_nodes import (
     risk_governance_node,
     roadmap_planning_node,
     proposal_writing_node,
-    report_generation_node
+    report_generation_node,
 )
 
 logger = logging.getLogger("AssessmentOrchestrator")
+
 
 class AssessmentOrchestrator:
     def __init__(self):
         # 1. Initialize Graph with state model
         workflow = StateGraph(AssessmentState)
-        
+
         # 2. Add nodes
         workflow.add_node("document_understanding", document_understanding_node)
         workflow.add_node("business_context", business_context_node)
@@ -32,7 +33,7 @@ class AssessmentOrchestrator:
         workflow.add_node("roadmap_planning", roadmap_planning_node)
         workflow.add_node("proposal_writing", proposal_writing_node)
         workflow.add_node("report_generation", report_generation_node)
-        
+
         # 3. Add sequential transitions
         workflow.set_entry_point("document_understanding")
         workflow.add_edge("document_understanding", "business_context")
@@ -44,22 +45,26 @@ class AssessmentOrchestrator:
         workflow.add_edge("roadmap_planning", "proposal_writing")
         workflow.add_edge("proposal_writing", "report_generation")
         workflow.add_edge("report_generation", END)
-        
+
         # 4. Set Memory Checkpointer to enable pause/resume
         self.checkpointer = MemorySaver()
         self.app = workflow.compile(checkpointer=self.checkpointer)
         logger.info("LangGraph Assessment Orchestrator compiled successfully.")
 
-    def run_assessment(self, initial_state: Dict[str, Any], thread_id: str = "default_thread") -> Dict[str, Any]:
+    def run_assessment(
+        self, initial_state: Dict[str, Any], thread_id: str = "default_thread"
+    ) -> Dict[str, Any]:
         """
         Executes the LangGraph analysis pipeline on the given initial state under a thread.
         """
-        logger.info(f"Triggering LangGraph run on thread {thread_id} for assessment {initial_state.get('assessment_id')}...")
+        logger.info(
+            f"Triggering LangGraph run on thread {thread_id} for assessment {initial_state.get('assessment_id')}..."
+        )
         config = {"configurable": {"thread_id": thread_id}}
-        
+
         # Compile input structure
         inputs = AssessmentState(**initial_state)
-        
+
         # Run graph
         final_state = self.app.invoke(inputs, config=config)
         logger.info("LangGraph run completed successfully.")

@@ -12,12 +12,15 @@ Base = declarative_base()
 engine = None
 SessionLocal = None
 
+
 def init_db():
     global engine, SessionLocal
-    
+
     # Try PostgreSQL first
     try:
-        logger.info(f"Attempting connection to PostgreSQL at {settings.POSTGRES_HOST}...")
+        logger.info(
+            f"Attempting connection to PostgreSQL at {settings.POSTGRES_HOST}..."
+        )
         postgres_url = settings.DATABASE_URL
         engine = create_engine(postgres_url, connect_args={"connect_timeout": 3})
         # Test connection
@@ -26,20 +29,28 @@ def init_db():
         SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     except Exception as e:
         if settings.REQUIRE_POSTGRES:
-            logger.error("PostgreSQL connection failed while REQUIRE_POSTGRES=true. Refusing SQLite fallback.")
+            logger.error(
+                "PostgreSQL connection failed while REQUIRE_POSTGRES=true. Refusing SQLite fallback."
+            )
             raise e
         logger.warning(f"PostgreSQL connection failed ({e}). Falling back to SQLite...")
         try:
             sqlite_url = settings.SQLITE_URL
-            engine = create_engine(sqlite_url, connect_args={"check_same_thread": False})
-            logger.info(f"Successfully initialized SQLite database fallback at: {sqlite_url}")
+            engine = create_engine(
+                sqlite_url, connect_args={"check_same_thread": False}
+            )
+            logger.info(
+                f"Successfully initialized SQLite database fallback at: {sqlite_url}"
+            )
             SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
         except Exception as sqle:
             logger.error(f"SQLite initialization also failed! {sqle}")
             raise sqle
 
+
 # Initialize DB on import/startup
 init_db()
+
 
 def get_database_health() -> dict:
     with engine.connect() as conn:
@@ -51,12 +62,14 @@ def get_database_health() -> dict:
         "driver": engine.url.drivername,
     }
 
+
 def get_db():
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
+
 
 def ensure_runtime_schema():
     """
@@ -67,28 +80,44 @@ def ensure_runtime_schema():
     if "assessments" not in inspector.get_table_names():
         return
 
-    assessment_columns = {column["name"] for column in inspector.get_columns("assessments")}
+    assessment_columns = {
+        column["name"] for column in inspector.get_columns("assessments")
+    }
     if "user_id" not in assessment_columns:
-        logger.info("Adding missing assessments.user_id column for authenticated ownership...")
+        logger.info(
+            "Adding missing assessments.user_id column for authenticated ownership..."
+        )
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE assessments ADD COLUMN user_id INTEGER"))
 
     if "client_id" not in assessment_columns:
-        logger.info("Adding missing assessments.client_id column for client workspace mapping...")
+        logger.info(
+            "Adding missing assessments.client_id column for client workspace mapping..."
+        )
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE assessments ADD COLUMN client_id INTEGER"))
 
     if "client_summary" not in assessment_columns:
-        logger.info("Adding missing assessments.client_summary column for client-facing summaries...")
+        logger.info(
+            "Adding missing assessments.client_summary column for client-facing summaries..."
+        )
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE assessments ADD COLUMN client_summary TEXT"))
 
     if "reviewer_notes" not in assessment_columns:
-        logger.info("Adding missing assessments.reviewer_notes column for internal consultant notes...")
+        logger.info(
+            "Adding missing assessments.reviewer_notes column for internal consultant notes..."
+        )
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE assessments ADD COLUMN reviewer_notes TEXT"))
 
     if "approval_status" not in assessment_columns:
-        logger.info("Adding missing assessments.approval_status column for review workflow...")
+        logger.info(
+            "Adding missing assessments.approval_status column for review workflow..."
+        )
         with engine.begin() as conn:
-            conn.execute(text("ALTER TABLE assessments ADD COLUMN approval_status VARCHAR DEFAULT 'draft'"))
+            conn.execute(
+                text(
+                    "ALTER TABLE assessments ADD COLUMN approval_status VARCHAR DEFAULT 'draft'"
+                )
+            )
