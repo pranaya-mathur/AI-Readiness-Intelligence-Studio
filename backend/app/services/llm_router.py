@@ -88,16 +88,16 @@ class LLMRouter:
         )
         try:
             url = f"{settings.OLLAMA_HOST}/api/chat"
-            payload: dict[str, Any] = {
+            ollama_payload: dict[str, Any] = {
                 "model": model,
                 "messages": messages,
                 "options": {"temperature": temperature},
                 "stream": False,
             }
             if require_json:
-                payload["format"] = "json"
+                ollama_payload["format"] = "json"
 
-            response = requests.post(url, json=payload, timeout=12)
+            response = requests.post(url, json=ollama_payload, timeout=12)
             if response.status_code == 200:
                 return response.json()["message"]["content"]
             else:
