@@ -164,6 +164,118 @@ export default function Home() {
   // API loader
   const [loading, setLoading] = useState(false);
 
+  // Dynamically calculated command center outcomes:
+  const overallScore = selectedAssessment ? int(selectedAssessment.overall_score) : 0;
+  const highValueOpportunities = selectedAssessment?.use_cases?.filter(u => u.value === "High").length ?? 0;
+  const quickWinPilots = selectedAssessment?.use_cases?.filter(u => u.value === "High" && u.complexity === "Low").length ?? 0;
+  const governanceRisksCount = selectedAssessment?.risks?.filter(r => r.severity === "High" || r.severity === "Medium").length ?? 0;
+  const automationPotentialVal = selectedAssessment ? int(selectedAssessment.automation_potential) : 0;
+  const recommendedFirstPilotName = selectedAssessment?.recommended_first_pilot ?? "TBD";
+  const riskLevelVal = selectedAssessment?.risk_level ?? "Low";
+  const currentApprovalStatusVal = selectedAssessment?.approval_status ?? "draft";
+
+  const getReadinessDimensionExplanation = (subject: string, score: number) => {
+    const currentTools = selectedAssessment?.current_tools || [];
+    const painPoints = selectedAssessment?.pain_points || [];
+    const compliance = selectedAssessment?.compliance_requirements || [];
+    
+    const toolsStr = currentTools.length > 0 ? currentTools.join(", ") : "internal legacy tools";
+    const painStr = painPoints.length > 0 ? painPoints.slice(0, 2).join(" and ").toLowerCase() : "manual coordination friction";
+    const compStr = compliance.length > 0 ? compliance.join(", ") : "general industry baselines";
+
+    switch(subject) {
+      case "Data Readiness":
+        if (score >= 70) {
+          return {
+            explanation: `Structured data sources are reasonably well-defined in existing tools like ${toolsStr}, creating a viable foundation for ingestion.`,
+            recommendation: "Establish automated data pipelines and data ingestion scrubbers to maintain high-quality vectors for LLM context windows."
+          };
+        } else {
+          return {
+            explanation: `Data exists across business systems, but fragmentation across ${toolsStr} limits immediate AI scaling due to manual silos and inconsistent formatting.`,
+            recommendation: "Centralize corporate knowledge databases into structured cloud directories and consolidate scattered team spreadsheets."
+          };
+        }
+      case "Process Readiness":
+        if (score >= 70) {
+          return {
+            explanation: "Core business workflows are structured, with clean handoff points and standardized steps suitable for immediate agent routing.",
+            recommendation: "Deploy shadow AI models to test auto-classification in live operations before replacing manual routing entirely."
+          };
+        } else {
+          return {
+            explanation: `Several workflows in scoping scope are highly repetitive and prone to ${painStr}, but lack formal process standardization before scaling.`,
+            recommendation: "Document step-by-step operating guidelines for proposal drafting and ticket routing to prepare structured templates for AI mapping."
+          };
+        }
+      case "Integration Readiness":
+        if (score >= 70) {
+          return {
+            explanation: `Existing stack (${toolsStr}) supports standard REST/GraphQL APIs, allowing AI agents to query and write data seamlessly.`,
+            recommendation: "Register customized webhook triggers and develop lightweight middleware integrations to track automated actions."
+          };
+        } else {
+          return {
+            explanation: `Existing tools provide base integration potential, but lack cohesive middleware pipelines, resulting in manual copy-paste routines.`,
+            recommendation: "Build dedicated middleware endpoints or leverage unified connector APIs to integrate AI workflows into CRM and ticketing databases."
+          };
+        }
+      case "Governance Readiness":
+        if (score >= 70) {
+          return {
+            explanation: `Rigid control logs and tracking structures are configured, ensuring all automated client operations remain audible.`,
+            recommendation: "Configure automated prompt-engineering validation rules and deploy semantic filters to continuously check LLM outputs."
+          };
+        } else {
+          return {
+            explanation: `Compliance requirements (${compStr}) are known, but AI-specific controls like audit trails, approval gates, and output validation must be strengthened.`,
+            recommendation: "Mandate Human Review workflows for all generated proposal drafts and support responses before external delivery."
+          };
+        }
+      case "Security Readiness":
+        if (score >= 70) {
+          return {
+            explanation: `Strong security postures are active, including SOC2/GDPR compliance frameworks that cover basic data access rights.`,
+            recommendation: "Implement private tenant workspace isolations and set up enterprise single-sign-on (SSO) credentials."
+          };
+        } else {
+          return {
+            explanation: `Security baseline is operational, but sensitive document handling, regex-based PII scrubbing, and role-based access controls require enforcement before scale.`,
+            recommendation: "Integrate automatic pre-processing sanitizers to scrub proprietary figures and customer identifiers before dispatching to external APIs."
+          };
+        }
+      case "Team Readiness":
+        if (score >= 70) {
+          return {
+            explanation: "Consultants and transformation executives display strong agility and are highly prepared to adopt conversational AI copilots.",
+            recommendation: "Appoint internal 'AI champions' to host weekly feedback sessions and prioritize next-phase feature requirements."
+          };
+        } else {
+          return {
+            explanation: `Teams can highly benefit from AI proposal and support copilots, but formal usage guidelines and onboarding cycles are required for sustainable adoption.`,
+            recommendation: "Conduct structured training workshops and define clear guidelines highlighting standard operating protocols for AI outputs."
+          };
+        }
+      case "Business Alignment":
+        if (score >= 70) {
+          return {
+            explanation: `AI opportunities align tightly with high-priority business objectives such as shortening sales cycles and improving margins.`,
+            recommendation: "Track clear key performance indicators (KPIs) like average draft generation time to demonstrate strategic ROI."
+          };
+        } else {
+          return {
+            explanation: `AI goals are aligned with general priorities (e.g. efficiency or cost reduction), but require concrete mapping to operational bottlenecks.`,
+            recommendation: "Establish immediate pilot projects (like proposal copilot MVP) to quickly prove value and secure leadership buy-in."
+          };
+        }
+      default:
+        return {
+          explanation: "Assessment dimension calculated based on intake signals and industry averages.",
+          recommendation: "Continue tracking baseline metrics across discovery sessions."
+        };
+    }
+  };
+
   // --- PROCESSING STEPS ---
   const steps = [
     "Analyzing documents...",
@@ -656,7 +768,7 @@ export default function Home() {
           <div className="text-center mb-8">
             <div className="flex justify-center items-center gap-2 mb-2">
               <Brain className="w-8 h-8 text-blue-500 glow-subtle" />
-              <span className="text-2xl font-bold tracking-tight text-gradient">Antigravity</span>
+              <span className="text-2xl font-bold tracking-tight text-gradient">AI Readiness Studio</span>
             </div>
             <h1 className="text-xl font-bold">AI Readiness Intelligence Studio</h1>
             <p className="text-xs text-slate-400 mt-2">
@@ -706,7 +818,7 @@ export default function Home() {
           </form>
 
           <div className="relative my-6 text-center">
-            <span className="text-xs text-slate-500 bg-slate-950 px-2 relative z-10">OR DEMO FLOW</span>
+            <span className="text-xs text-slate-500 bg-slate-950 px-2 relative z-10">WALKTHROUGH WORKSPACE</span>
             <div className="absolute top-1/2 left-0 right-0 h-[1px] bg-slate-800" />
           </div>
 
@@ -715,7 +827,7 @@ export default function Home() {
             className="w-full bg-indigo-950/40 hover:bg-indigo-900/60 border border-indigo-500/30 text-indigo-300 rounded-lg py-2.5 text-xs font-semibold transition-all flex items-center justify-center gap-2"
           >
             <Sparkles className="w-4 h-4 text-indigo-400 animate-pulse" />
-            <span>Load B2B Consulting Firm Demo</span>
+            <span>Load Sample Client Workspace</span>
           </button>
         </div>
       </main>
@@ -816,40 +928,51 @@ export default function Home() {
         {/* 1. LANDING DASHBOARD */}
         {activeTab === "dashboard" && (
           <div className="space-y-6">
-            {/* Metric Blocks */}
-            <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
+            {/* Executive Command Center */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="glass-panel p-4 rounded-xl text-center flex flex-col justify-between">
                 <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Overall AI Readiness</span>
-                <span className="text-3xl font-extrabold text-blue-500 my-2">62/100</span>
-                <span className="text-[9px] text-slate-500">Industry benchmark: 48</span>
+                <span className="text-3xl font-extrabold text-blue-500 my-2">{overallScore > 0 ? `${overallScore}/100` : "TBD"}</span>
+                <span className="text-[9px] text-slate-500">Target index for scaling</span>
               </div>
               <div className="glass-panel p-4 rounded-xl text-center flex flex-col justify-between">
-                <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Opportunities Found</span>
-                <span className="text-3xl font-extrabold text-indigo-400 my-2">9</span>
+                <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">High-Value AI Opportunities</span>
+                <span className="text-3xl font-extrabold text-indigo-400 my-2">{highValueOpportunities}</span>
                 <span className="text-[9px] text-slate-500">Strategic maps created</span>
               </div>
               <div className="glass-panel p-4 rounded-xl text-center flex flex-col justify-between">
                 <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Quick-Win Pilots</span>
-                <span className="text-3xl font-extrabold text-emerald-400 my-2">3</span>
-                <span className="text-[9px] text-slate-500">Low-complexity quick wins</span>
+                <span className="text-3xl font-extrabold text-emerald-400 my-2">{quickWinPilots}</span>
+                <span className="text-[9px] text-slate-500">Low-complexity, high-value</span>
               </div>
               <div className="glass-panel p-4 rounded-xl text-center flex flex-col justify-between">
-                <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Governance Gaps</span>
-                <span className="text-3xl font-extrabold text-amber-500 my-2">7</span>
-                <span className="text-[9px] text-slate-500">Compliance checkpoints</span>
+                <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Governance Risks</span>
+                <span className="text-3xl font-extrabold text-amber-500 my-2">{governanceRisksCount}</span>
+                <span className="text-[9px] text-slate-500">Open risk checkpoints</span>
               </div>
               <div className="glass-panel p-4 rounded-xl text-center flex flex-col justify-between">
                 <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Automation Potential</span>
-                <span className="text-3xl font-extrabold text-purple-400 my-2">28%</span>
-                <span className="text-[9px] text-slate-500">Operational cycles</span>
+                <span className="text-3xl font-extrabold text-purple-400 my-2">{automationPotentialVal}%</span>
+                <span className="text-[9px] text-slate-500">Estimated cycles optimized</span>
               </div>
               <div className="glass-panel p-4 rounded-xl text-center flex flex-col justify-between">
-                <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">90-Day Roadmap</span>
-                <span className="text-xs font-bold text-emerald-400 my-4 flex items-center justify-center gap-1">
-                  <CheckCircle className="w-4 h-4 shrink-0" />
-                  <span>Timeline Ready</span>
+                <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Recommended First Pilot</span>
+                <span className="text-xs font-bold text-blue-400 my-4 line-clamp-2 leading-tight">
+                  {recommendedFirstPilotName}
                 </span>
-                <span className="text-[9px] text-slate-500">PDF slide deck ready</span>
+                <span className="text-[9px] text-slate-500">Immediate impact vector</span>
+              </div>
+              <div className="glass-panel p-4 rounded-xl text-center flex flex-col justify-between">
+                <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Risk Level</span>
+                <span className="text-3xl font-extrabold text-red-400 my-2">{riskLevelVal}</span>
+                <span className="text-[9px] text-slate-500">Advisory risk profile</span>
+              </div>
+              <div className="glass-panel p-4 rounded-xl text-center flex flex-col justify-between">
+                <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Approval Status</span>
+                <span className={`text-xs font-bold my-4 uppercase px-2.5 py-1 rounded-full border mx-auto w-fit ${getApprovalStatusBadge(currentApprovalStatusVal)}`}>
+                  {currentApprovalStatusVal}
+                </span>
+                <span className="text-[9px] text-slate-500">Human review flow</span>
               </div>
             </div>
 
@@ -1334,7 +1457,7 @@ export default function Home() {
 
               {selectedFiles.length === 0 && (
                 <div className="mt-4 rounded-lg border border-amber-500/20 bg-amber-950/10 p-3 text-left text-xs text-amber-200">
-                  No files selected yet. Running the pipeline now will use a synthetic briefing file built from this intake so the demo stays grounded to the client context.
+                  No files selected yet. Running the pipeline now will use a synthetic briefing file built from this intake so the analysis stays grounded to the client context.
                 </div>
               )}
 
@@ -1446,6 +1569,7 @@ export default function Home() {
 
               {[
                 { id: "summary", label: "Executive Summary", icon: FileText },
+                { id: "evidence", label: "Evidence Trail", icon: Sparkles },
                 { id: "bottlenecks", label: "Process Bottlenecks", icon: Trash2 },
                 { id: "opportunity", label: "Opportunities Map", icon: Brain },
                 { id: "matrix", label: "Prioritization Grid", icon: BarChart3 },
@@ -1453,7 +1577,7 @@ export default function Home() {
                 { id: "risks", label: "Risk & Governance", icon: Shield },
                 { id: "pilot", label: "Recommended Pilot", icon: Sparkles },
                 { id: "roadmap", label: "90-Day Roadmap", icon: Calendar },
-                { id: "export", label: "Report Downloads", icon: Download }
+                { id: "export", label: "Strategy Asset Generator", icon: Download }
               ].map(sub => {
                 const active = insightsSubTab === sub.id;
                 const Icon = sub.icon;
@@ -1652,6 +1776,114 @@ export default function Home() {
                       </div>
                     </div>
                   )}
+
+                  {/* Before vs After Section */}
+                  <div className="p-4 bg-slate-900/40 border border-slate-800 rounded-xl space-y-4">
+                    <div>
+                      <h4 className="text-xs uppercase font-extrabold tracking-wider text-indigo-400 flex items-center gap-1.5">
+                        <TrendingUp className="w-4 h-4 shrink-0" />
+                        <span>Business Case: Before vs After Transformation</span>
+                      </h4>
+                      <p className="text-[10px] text-slate-500 mt-0.5">Comparative projection of AI-enabled operational efficiencies.</p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {[
+                        {
+                          workflow: "Proposal Drafting",
+                          before: "2–3 days of manual copy-pasting reference sections, winning sheets, and legal schedules.",
+                          after: "First draft in under 30 minutes with centralized approved knowledge reuse and automatic formatting."
+                        },
+                        {
+                          workflow: "Support Triage",
+                          before: "Manual classification, incident tagging, and engineers scanning inbox directories.",
+                          after: "Autonomous ticket routing and draft responses with confidence metrics and human sign-off."
+                        },
+                        {
+                          workflow: "Compliance Review",
+                          before: "Checklist-based manual review of agreement provisions and GDPR checklists.",
+                          after: "AI-assisted policy gap scanning highlighting deviations across client service contracts."
+                        },
+                        {
+                          workflow: "Knowledge Search",
+                          before: "Scattered information and team files distributed across SharePoint, Slack, and emails.",
+                          after: "Source-backed conversational answer retrieval with direct document citations."
+                        }
+                      ].map((item, idx) => (
+                        <div key={idx} className="p-3 bg-slate-950/50 border border-slate-800 rounded-lg space-y-2">
+                          <span className="text-xs font-bold text-slate-200 block">{item.workflow}</span>
+                          <div className="grid grid-cols-2 gap-3 text-[10px]">
+                            <div className="border-r border-slate-800/80 pr-2">
+                              <span className="text-red-400 font-bold uppercase tracking-wider block text-[8px] mb-1">Current State:</span>
+                              <p className="text-slate-400 leading-normal">{item.before}</p>
+                            </div>
+                            <div>
+                              <span className="text-emerald-400 font-bold uppercase tracking-wider block text-[8px] mb-1">AI-Enabled State:</span>
+                              <p className="text-slate-300 leading-normal">{item.after}</p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Evidence Trail View */}
+              {insightsSubTab === "evidence" && (
+                <div className="glass-panel p-6 rounded-2xl space-y-6">
+                  <div>
+                    <h3 className="text-base font-bold flex items-center gap-2">
+                      <Sparkles className="w-5 h-5 text-blue-500 glow-subtle" />
+                      <span>Opportunity Evidence Trail</span>
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-1">
+                      Direct audit trails linking client context and uploaded documents to AI transformation opportunities.
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-4 text-xs space-y-2">
+                    <span className="font-semibold text-slate-300 block">Grounding Mode:</span>
+                    <p className="text-slate-400">
+                      This workspace is currently backed by <strong className="text-blue-400">{isDocumentGrounded ? "Document-Grounded Evidence" : "Structured Brief Evidence"}</strong>. 
+                      {isDocumentGrounded 
+                        ? " All signals represent verified passages parsed from your uploaded corporate playbooks and audit files."
+                        : " Signals are derived from standard professional services intake profiles and our walkthrough template brief."
+                      }
+                    </p>
+                  </div>
+
+                  {selectedAssessment.extracted_signals && selectedAssessment.extracted_signals.length > 0 ? (
+                    <div className="space-y-4">
+                      {selectedAssessment.extracted_signals.map((sig, idx: number) => (
+                        <div key={idx} className="p-4 bg-slate-900/30 border border-slate-800 rounded-xl flex flex-col md:flex-row justify-between gap-4 hover:border-slate-700 transition-all">
+                          <div className="space-y-1.5">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded border border-blue-500/20 bg-blue-950/20 text-blue-300">
+                                {sig.signal_type}
+                              </span>
+                              <span className="text-[10px] text-slate-500 font-medium">
+                                Source: <strong>{sig.source_file}</strong>
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-200 leading-relaxed font-semibold">
+                              {sig.description}
+                            </p>
+                          </div>
+                          <div className="shrink-0 flex items-center">
+                            <span className="text-sm font-extrabold text-emerald-400 bg-emerald-950/40 border border-emerald-500/20 px-2.5 py-1 rounded-lg">
+                              {int(sig.confidence)}% Conf.
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-12 border border-dashed border-slate-800 rounded-xl">
+                      <Sparkles className="w-8 h-8 text-slate-600 mx-auto mb-2" />
+                      <p className="text-xs text-slate-400">No signals have been extracted yet. Select a preloaded walkthrough workspace or run the AI pipeline.</p>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1717,9 +1949,17 @@ export default function Home() {
                         
                         {/* Evidence reasoning callout */}
                         {u.evidence && (
-                          <div className="mt-3 p-2.5 bg-slate-950 rounded-lg border border-slate-800 text-[10px] text-slate-400 flex items-start gap-2">
-                            <Sparkles className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
-                            <p><strong>Evidence:</strong> {u.evidence}</p>
+                          <div className="mt-3 p-3 bg-slate-950 rounded-xl border border-slate-800 text-[10px] text-slate-400 flex flex-col gap-1.5">
+                            <div className="flex items-center gap-1.5 justify-between flex-wrap">
+                              <span className="font-semibold text-slate-300 flex items-center gap-1.5">
+                                <Sparkles className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                                <span>Why this was recommended:</span>
+                              </span>
+                              <span className={`text-[8px] font-extrabold uppercase px-2 py-0.5 rounded border ${isDocumentGrounded ? "border-emerald-500/20 bg-emerald-950/20 text-emerald-300" : "border-indigo-500/20 bg-indigo-950/20 text-indigo-300"}`}>
+                                {isDocumentGrounded ? "Document-Grounded Evidence" : "Structured Brief Evidence"}
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-400 leading-relaxed">{u.evidence}</p>
                           </div>
                         )}
                       </div>
@@ -1818,6 +2058,40 @@ export default function Home() {
                   <p className="text-xs text-slate-300 leading-relaxed pt-4 border-t border-slate-800">
                     <strong>Interpretation:</strong> {selectedAssessment.readiness_interpretation}
                   </p>
+
+                  {/* Detailed Dimension Explanations Stack */}
+                  <div className="pt-6 border-t border-slate-800 space-y-4">
+                    <h4 className="text-sm font-bold text-slate-200">Dimension Analysis & Action Plans</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {[
+                        { key: "data_readiness", subject: "Data Readiness", score: selectedAssessment.data_readiness },
+                        { key: "process_readiness", subject: "Process Readiness", score: selectedAssessment.process_readiness },
+                        { key: "integration_readiness", subject: "Integration Readiness", score: selectedAssessment.integration_readiness },
+                        { key: "governance_readiness", subject: "Governance Readiness", score: selectedAssessment.governance_readiness },
+                        { key: "security_readiness", subject: "Security Readiness", score: selectedAssessment.security_readiness },
+                        { key: "team_readiness", subject: "Team Readiness", score: selectedAssessment.team_readiness },
+                        { key: "business_alignment", subject: "Business Alignment", score: selectedAssessment.business_alignment }
+                      ].map((dim) => {
+                        const { explanation, recommendation } = getReadinessDimensionExplanation(dim.subject, dim.score);
+                        return (
+                          <div key={dim.key} className="p-4 bg-slate-950/50 border border-slate-800 rounded-xl space-y-2">
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="text-xs font-bold text-slate-200">{dim.subject}</span>
+                              <span className={`text-xs font-extrabold ${dim.score >= 70 ? "text-emerald-400" : dim.score >= 50 ? "text-blue-400" : "text-amber-500"}`}>
+                                {int(dim.score)}/100
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-400 leading-relaxed">
+                              <strong>Status:</strong> {explanation}
+                            </p>
+                            <p className="text-[11px] text-blue-400 bg-blue-950/20 border border-blue-500/10 p-2 rounded leading-relaxed">
+                              <strong>Recommendation:</strong> {recommendation}
+                            </p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -1941,10 +2215,10 @@ export default function Home() {
                 </div>
               )}
 
-              {/* I: Report & Proposal Export downloads panel */}
+              {/* I: Strategy Asset Generator export downloads panel */}
               {insightsSubTab === "export" && (
                 <div className="glass-panel p-6 rounded-2xl space-y-6">
-                  <h3 className="text-base font-bold">Generated Strategic Asset Center</h3>
+                  <h3 className="text-base font-bold">Strategy Asset Generator</h3>
                   <p className="text-xs text-slate-400">One-click compile triggers producing production-ready deliverables.</p>
 
                   {!canExport && (
@@ -1952,10 +2226,7 @@ export default function Home() {
                       <div className="flex items-start gap-2">
                         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                         <div>
-                          <p className="font-semibold">Exports are locked until the assessment is approved.</p>
-                          <p className="mt-1 text-amber-300/90">
-                            Open Human Review Mode, finalize the client-facing summary, then set the review status to <strong>Approved</strong>.
-                          </p>
+                          <p className="font-semibold">Please approve this assessment in Human Review Mode before generating client-ready assets.</p>
                         </div>
                       </div>
                     </div>
@@ -1968,7 +2239,7 @@ export default function Home() {
                         <div className="p-1.5 bg-red-950/40 border border-red-500/20 text-red-400 w-fit rounded-lg mb-2">
                           <FileText className="w-5 h-5" />
                         </div>
-                        <h4 className="text-xs font-bold text-slate-200">AI Readiness Summary Report</h4>
+                        <h4 className="text-xs font-bold text-slate-200">AI Readiness Report</h4>
                         <p className="text-[10px] text-slate-400 mt-1">CSS-rich diagnostic scorecard PDF summarizing assessments.</p>
                       </div>
                       <button 
@@ -1977,7 +2248,7 @@ export default function Home() {
                         className={`w-full rounded-lg py-2 text-xs font-bold transition-colors flex items-center justify-center gap-1 ${canExport ? "bg-red-600 hover:bg-red-700 text-white" : "cursor-not-allowed bg-slate-800 text-slate-500"}`}
                       >
                         <Download className="w-3.5 h-3.5" />
-                        <span>Export PDF Report</span>
+                        <span>Generate PDF Report</span>
                       </button>
                     </div>
 
@@ -1986,7 +2257,7 @@ export default function Home() {
                         <div className="p-1.5 bg-blue-950/40 border border-blue-500/20 text-blue-400 w-fit rounded-lg mb-2">
                           <FileText className="w-5 h-5" />
                         </div>
-                        <h4 className="text-xs font-bold text-slate-200">Pilot Scope Proposal</h4>
+                        <h4 className="text-xs font-bold text-slate-200">Pilot Proposal</h4>
                         <p className="text-[10px] text-slate-400 mt-1">MS Word document (DOCX) featuring solution structures.</p>
                       </div>
                       <button 
@@ -1995,7 +2266,7 @@ export default function Home() {
                         className={`w-full rounded-lg py-2 text-xs font-bold transition-colors flex items-center justify-center gap-1 ${canExport ? "bg-blue-600 hover:bg-blue-700 text-white" : "cursor-not-allowed bg-slate-800 text-slate-500"}`}
                       >
                         <Download className="w-3.5 h-3.5" />
-                        <span>Export DOCX Scope</span>
+                        <span>Generate DOCX Proposal</span>
                       </button>
                     </div>
 
@@ -2004,7 +2275,7 @@ export default function Home() {
                         <div className="p-1.5 bg-amber-950/40 border border-amber-500/20 text-amber-400 w-fit rounded-lg mb-2">
                           <FileText className="w-5 h-5" />
                         </div>
-                        <h4 className="text-xs font-bold text-slate-200">Executive Slide Presentation</h4>
+                        <h4 className="text-xs font-bold text-slate-200">Executive Board Deck</h4>
                         <p className="text-[10px] text-slate-400 mt-1">PowerPoint deck (PPTX) with custom gradient covers.</p>
                       </div>
                       <button 
@@ -2013,7 +2284,7 @@ export default function Home() {
                         className={`w-full rounded-lg py-2 text-xs font-bold transition-colors flex items-center justify-center gap-1 ${canExport ? "bg-amber-600 hover:bg-amber-700 text-white" : "cursor-not-allowed bg-slate-800 text-slate-500"}`}
                       >
                         <Download className="w-3.5 h-3.5" />
-                        <span>Export PPTX Presentation</span>
+                        <span>Generate PPTX Board Deck</span>
                       </button>
                     </div>
 

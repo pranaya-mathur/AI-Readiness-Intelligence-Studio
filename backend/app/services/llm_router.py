@@ -205,12 +205,12 @@ class LLMRouter:
             tool_hint = current_tools[idx] if idx < len(current_tools) else (current_tools[0] if current_tools else "existing systems")
             if "Proposal" in process_name:
                 return {
-                    "use_case_name": "AI Proposal Copilot",
+                    "use_case_name": "Intelligent Pre-Sales Proposal Copilot",
                     "department": department,
-                    "description": f"Generate first-draft proposal content, response structures, and reusable sections while keeping consultants in review control inside {tool_hint}.",
+                    "description": "Intelligent solution drafting companion that pulls from verified proposal assets and past winning bid documents to build compliance-mapped proposal outlines.",
                     "value": "High",
                     "complexity": "Low",
-                    "risk": "Medium",
+                    "risk": "Low",
                     "priority": "P1",
                     "evidence": f"Recommended because '{process_name}' is manual today and the stated goal is '{goals or 'faster service delivery'}'.",
                     "confidence": 91.0,
@@ -256,12 +256,12 @@ class LLMRouter:
         goals_lower = goals.lower()
         if "proposal" in goals_lower:
             derived_use_cases.insert(0, {
-                "use_case_name": "AI Proposal Copilot",
+                "use_case_name": "Intelligent Pre-Sales Proposal Copilot",
                 "department": "Sales & Pre-sales" if "Sales & Pre-sales" in departments else departments[0],
-                "description": "Generate first-draft proposals, reusable sections, and response structures while keeping consultants in review control.",
+                "description": "Intelligent solution drafting companion that pulls from verified proposal assets and past winning bid documents to build compliance-mapped proposal outlines.",
                 "value": "High",
                 "complexity": "Low",
-                "risk": "Medium",
+                "risk": "Low",
                 "priority": "P1",
                 "evidence": f"Recommended because the stated business goal is '{goals}' and the delivery model still depends on manual proposal assembly.",
                 "confidence": 91.0,

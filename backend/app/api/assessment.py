@@ -503,8 +503,8 @@ def create_demo_mode(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Auto-fills a complete, premium assessment with mock B2B consulting data"""
-    logger.info("Initializing High-Impact Demo Mode...")
+    """Auto-fills a complete, premium assessment with walkthrough client workspace data"""
+    logger.info("Initializing Walkthrough Sample Workspace...")
     organization = get_or_create_default_organization(db, current_user)
     demo_client = (
         db.query(Client)
@@ -544,8 +544,8 @@ def create_demo_mode(
             )
         if existing_demo.reviewer_notes is None:
             existing_demo.reviewer_notes = (
-                "Demo workspace is pre-reviewed for sales walkthroughs. Reconfirm integration assumptions "
-                "and compliance posture before using externally."
+                "Sample client workspace pre-reviewed for consulting walkthroughs. Reconfirm integration assumptions "
+                "and compliance posture against live environments."
             )
         if existing_demo.approval_status != "approved":
             existing_demo.approval_status = "approved"
@@ -596,8 +596,8 @@ def create_demo_mode(
             "without forcing a large platform replacement."
         ),
         reviewer_notes=(
-            "Demo workspace is pre-reviewed for sales walkthroughs. Reconfirm integration assumptions "
-            "and compliance posture before using externally."
+            "Sample client workspace pre-reviewed for consulting walkthroughs. Reconfirm integration assumptions "
+            "and compliance posture against live environments."
         ),
         approval_status="approved",
         readiness_interpretation=(
@@ -607,7 +607,7 @@ def create_demo_mode(
         ),
         recommended_first_pilot="Intelligent Pre-Sales Proposal Copilot",
         why_recommended_pilot="High transformation value, low implementation complexity, and fits the corporate priority of accelerating pre-sales proposal throughput.",
-        expected_pilot_impact="Cuts proposal drafting duration from 3 days to under 10 minutes while improving win-rates by an estimated 15%."
+        expected_pilot_impact="Reduces first-draft proposal preparation from 2–3 days to under 30 minutes, while improving reuse of approved content, consistency, and senior review efficiency."
     )
     db.add(ass)
     db.commit()
@@ -618,7 +618,7 @@ def create_demo_mode(
         ProcessBottleneck(
             assessment_id=ass.id,
             department="Sales & Pre-sales",
-            process_name="Custom RFP RFP/Proposal Compilation",
+            process_name="Custom RFP / Proposal Compilation",
             bottleneck_description="Technical sales executives spend up to 12 hours manually copy-pasting references and templates from old bid documents.",
             ai_potential="High"
         ),
@@ -644,7 +644,7 @@ def create_demo_mode(
             assessment_id=ass.id,
             department="Sales & Pre-sales",
             use_case_name="Intelligent Pre-Sales Proposal Copilot",
-            description="Build a RAG-backed proposal companion that ingests RFPs and drafts highly contextual solution sections using previous winning templates.",
+            description="Intelligent solution drafting companion that pulls from verified proposal assets and past winning bid documents to build compliance-mapped proposal outlines.",
             value="High",
             complexity="Low",
             risk="Low",

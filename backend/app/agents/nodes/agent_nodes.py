@@ -168,14 +168,14 @@ def ai_use_case_node(state: AssessmentState) -> Dict[str, Any]:
     except Exception:
         use_cases = [
             {
-                "use_case_name": "Excel Copilot Automation Agent",
-                "department": "Operations",
-                "description": "Automated ingestion pipeline utilizing LLM structures to parse and migrate tabular Excel records automatically.",
+                "use_case_name": "Intelligent Pre-Sales Proposal Copilot",
+                "department": "Sales & Pre-sales",
+                "description": "Intelligent solution drafting companion that pulls from verified proposal assets and past winning bid documents to build compliance-mapped proposal outlines.",
                 "value": "High",
                 "complexity": "Low",
                 "risk": "Low",
                 "priority": "P1",
-                "evidence": "Recommended because uploaded sheets show repetitive rows matching structured logs.",
+                "evidence": "Recommended because workflow analysis shows heavy manual cycles spent on custom solution blocks in proposal compilation.",
                 "confidence": 92.0
             },
             {
@@ -377,9 +377,9 @@ def proposal_writing_node(state: AssessmentState) -> Dict[str, Any]:
     logger.info("Running Node: Proposal Writing...")
     # Highlight the first P1 use case as the recommended pilot
     pilot = {
-        "name": "Excel Copilot Automation Agent",
-        "why": "High automation value, low technical complexity, and maps straight to operations pain points in spreadsheet tracking.",
-        "expected_impact": "Saves 15 staff hours weekly with a potential automation efficiency boost of 28%.",
+        "name": "Intelligent Pre-Sales Proposal Copilot",
+        "why": "High business value, document-heavy process, low initial complexity, and ideal for a controlled AI rollout that establishes immediate consultant adoption.",
+        "expected_impact": "Reduces first-draft proposal preparation from 2–3 days to under 30 minutes, while improving reuse of approved content, consistency, and senior review efficiency.",
         "confidence": 92.0
     }
     
