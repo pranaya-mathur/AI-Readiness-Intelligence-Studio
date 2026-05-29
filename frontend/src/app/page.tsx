@@ -4,7 +4,8 @@ import React, { useState, useEffect, useCallback } from "react";
 import { 
   ArrowRight, Plus, FileText, CheckCircle, TrendingUp, 
   BarChart3, Brain, Shield, Calendar, Download, Edit3, Save, 
-  UploadCloud, Sparkles, RefreshCw, Trash2, AlertTriangle, LogOut
+  UploadCloud, Sparkles, RefreshCw, Trash2, AlertTriangle, LogOut,
+  Coins
 } from "lucide-react";
 import { 
   RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, 
@@ -133,7 +134,8 @@ export default function Home() {
   const [token, setToken] = useState("");
 
   const [activeTab, setActiveTab] = useState("dashboard"); // dashboard, intake, upload, insights
-  const [insightsSubTab, setInsightsSubTab] = useState("summary"); // summary, bottlenecks, opportunity, matrix, scoring, risks, pilot, roadmap, export
+  const [insightsSubTab, setInsightsSubTab] = useState("summary"); // summary, bottlenecks, opportunity, matrix, scoring, risks, pilot, roadmap, export, commercial
+  const [activeArchLayer, setActiveArchLayer] = useState("systems");
   
   const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [clients, setClients] = useState<ClientWorkspace[]>([]);
@@ -754,6 +756,236 @@ export default function Home() {
     if (value === "High") y = 25;
 
     return { x, y };
+  };
+
+  // --- COMMERCIAL STRATEGY HELPERS ---
+  const getEngagementRecommendation = () => {
+    if (!selectedAssessment) return {
+      model: "Pilot MVP Build",
+      pilotName: "Intelligent Pre-Sales Proposal Copilot",
+      pricingRange: "₹6L – ₹18L",
+      priceMin: 600000,
+      priceMax: 1800000,
+      rationale: "Initial pilot recommendations pending database loading.",
+      teamType: "Pilot MVP Build"
+    };
+
+    const company = selectedAssessment.company_name || "";
+    const isApex = company.toLowerCase().includes("apex");
+    const useCasesCount = selectedAssessment.use_cases?.length ?? 0;
+    const deptCount = selectedAssessment.departments?.length ?? 0;
+    
+    // safe dynamic scores sum
+    const dScore = selectedAssessment.data_readiness ?? 60;
+    const pScore = selectedAssessment.process_readiness ?? 60;
+    const iScore = selectedAssessment.integration_readiness ?? 60;
+    const gScore = selectedAssessment.governance_readiness ?? 60;
+    const sScore = selectedAssessment.security_readiness ?? 60;
+    const tScore = selectedAssessment.team_readiness ?? 60;
+    const bScore = selectedAssessment.business_alignment ?? 60;
+    const avgScore = Math.round((dScore + pScore + iScore + gScore + sScore + tScore + bScore) / 7);
+
+    // Apex walkthrough workspace overrides
+    if (isApex) {
+      return {
+        model: "Pilot MVP Build",
+        pilotName: "Intelligent Pre-Sales Proposal Copilot",
+        pricingRange: "₹6L – ₹18L",
+        priceMin: 600000,
+        priceMax: 1800000,
+        rationale: "The client has clear Sales & Pre-sales bottlenecks, highly structured reusable proposal playbooks, and a high-value / low-complexity P1 first pilot opportunity.",
+        teamType: "Pilot MVP Build"
+      };
+    }
+
+    // Dynamic heuristics
+    if (avgScore < 50) {
+      return {
+        model: "AI Readiness Sprint",
+        pilotName: selectedAssessment.recommended_first_pilot || "Transformation Strategy Blueprint",
+        pricingRange: "₹1.5L – ₹5L",
+        priceMin: 150000,
+        priceMax: 500000,
+        rationale: `With an overall AI readiness score of ${avgScore}/100, foundational data and alignment gaps should be resolved prior to direct engineering.`,
+        teamType: "AI Readiness Sprint"
+      };
+    } else if ((selectedAssessment.compliance_requirements?.length ?? 0) > 1 && gScore < 50) {
+      return {
+        model: "Managed AI Governance Retainer",
+        pilotName: "AI Compliance & Audit Framework",
+        pricingRange: "₹2L – ₹8L per month",
+        priceMin: 200000,
+        priceMax: 800000,
+        rationale: `Rigid compliance mandates (${selectedAssessment.compliance_requirements?.join(", ") ?? "GDPR/SOC2"}) and low governance readiness (${gScore}/100) call for ongoing expert oversight.`,
+        teamType: "Managed AI Governance Retainer"
+      };
+    } else if (tScore < 45) {
+      return {
+        model: "AI Enablement + Training Program",
+        pilotName: "Enterprise AI Enablement Series",
+        pricingRange: "₹3L – ₹12L",
+        priceMin: 300000,
+        priceMax: 1200000,
+        rationale: `Low team readiness score (${tScore}/100) indicates that human training and pilot adoption gates are key to project success.`,
+        teamType: "AI Enablement + Training Program"
+      };
+    } else if (avgScore > 75 && useCasesCount > 2) {
+      return {
+        model: "Production Rollout",
+        pilotName: selectedAssessment.recommended_first_pilot || "Cross-Department Production AI Nodes",
+        pricingRange: "₹20L – ₹75L+",
+        priceMin: 2000000,
+        priceMax: 7500000,
+        rationale: `High readiness score (${avgScore}/100) across ${deptCount} departments warrants a scalable production deployment of the opportunities catalog.`,
+        teamType: "Production Rollout"
+      };
+    } else {
+      return {
+        model: "Pilot MVP Build",
+        pilotName: selectedAssessment.recommended_first_pilot || "Intelligent Pre-Sales Proposal Copilot",
+        pricingRange: "₹6L – ₹18L",
+        priceMin: 600000,
+        priceMax: 1800000,
+        rationale: `Grounded use cases and solid alignment metrics support launching a practical, low-complexity initial pilot to build organizational trust.`,
+        teamType: "Pilot MVP Build"
+      };
+    }
+  };
+
+  const getCalibratedPricing = (rec: { model: string; pilotName: string; pricingRange: string; priceMin: number; priceMax: number; rationale: string; teamType: string; }) => {
+    if (!selectedAssessment) return rec.pricingRange;
+
+    let baseMin = rec.priceMin;
+    let baseMax = rec.priceMax;
+
+    // Adjust price dynamically based on scope
+    const deptCount = selectedAssessment.departments?.length ?? 0;
+    const complianceCount = selectedAssessment.compliance_requirements?.length ?? 0;
+    const iScore = selectedAssessment.integration_readiness ?? 60;
+    
+    // Add ₹50,000 for each department beyond 1
+    if (deptCount > 1) {
+      baseMin += (deptCount - 1) * 50000;
+      baseMax += (deptCount - 1) * 100000;
+    }
+
+    // Add ₹75,000 for each compliance requirement that adds review steps
+    if (complianceCount > 0) {
+      baseMin += complianceCount * 75000;
+      baseMax += complianceCount * 150000;
+    }
+
+    // Adjust for integration readiness score (low integration readiness = more middleware mapping needed = higher price)
+    if (iScore < 50) {
+      baseMin += 80000;
+      baseMax += 150000;
+    }
+
+    // Format output cleanly in Lakhs
+    const formatLakh = (val: number) => {
+      const lakhs = val / 100000;
+      return `₹${lakhs.toFixed(1)}L`;
+    };
+
+    return rec.model === "Managed AI Governance Retainer" 
+      ? `${formatLakh(baseMin)} – ${formatLakh(baseMax)} per month` 
+      : `${formatLakh(baseMin)} – ${formatLakh(baseMax)}`;
+  };
+
+  const getPricingJustifications = () => {
+    if (!selectedAssessment) return [];
+
+    const company = selectedAssessment.company_name || "";
+    const isApex = company.toLowerCase().includes("apex");
+
+    if (isApex) {
+      return [
+        { title: "Sales & Pre-sales", desc: "Intelligent Pre-Sales Proposal Copilot requires RAG semantic parsing over proprietary solution playbooks." },
+        { title: "Customer Support", desc: "Autonomous Support Triage Router demands layout classification and incident log parsing." },
+        { title: "Integrations in Scope", desc: "API integrations mapping Salesforce pipeline context, SharePoint files, and Jira webhooks." },
+        { title: "Compliance Checkpoints", desc: "GDPR policy checks and SOC2 Type II metadata auditing require secure tenant scoping." },
+        { title: "Strategic Asset Generator", desc: "Custom-branded PDF Readiness Reports and Executive Board PPTX export integrations." },
+        { title: "Human Review Workflow", desc: "Draft-to-Approved human-in-the-loop validation screens to prevent operational model hallucinations." }
+      ];
+    }
+
+    const factors = [];
+    // Dynamic factors based on actual assessment fields
+    if ((selectedAssessment.departments?.length ?? 0) > 0) {
+      factors.push({
+        title: `${selectedAssessment.departments.length} Department(s) in Scope`,
+        desc: `Custom workflows mapping context across ${selectedAssessment.departments.join(", ")}.`
+      });
+    }
+    if ((selectedAssessment.compliance_requirements?.length ?? 0) > 0) {
+      factors.push({
+        title: "Compliance Governance Controls",
+        desc: `Requires security scoping matching compliance policies for ${selectedAssessment.compliance_requirements.join(", ")}.`
+      });
+    }
+    if ((selectedAssessment.current_tools?.length ?? 0) > 0) {
+      factors.push({
+        title: "API & Middleware Integrations",
+        desc: `Middleware data synchronization with ${selectedAssessment.current_tools.slice(0, 3).join(", ") || "legacy datastores"}.`
+      });
+    }
+    if ((selectedAssessment.use_cases?.length ?? 0) > 0) {
+      factors.push({
+        title: `${selectedAssessment.use_cases.length} AI Use Case Target(s)`,
+        desc: "Requires parsing workflows, prompt templates, and semantic embeddings for the opportunity maps."
+      });
+    }
+    factors.push({
+      title: "Human Approval Flow",
+      desc: "Enforces consultant gating to validate model classification outputs prior to client-ready generation."
+    });
+    factors.push({
+      title: "Strategy Asset Exports",
+      desc: "Requires CSS-rich PDF scorecard compilation, PPTX deck exports, and DOCX pilot proposals."
+    });
+
+    return factors;
+  };
+
+  const getDeliveryTeam = (model: string) => {
+    if (model === "AI Readiness Sprint") {
+      return [
+        { role: "AI Engagement Lead", task: "Directs workshop sprints, shapes business strategy alignment, and handles client advisory loops.", load: "100%" },
+        { role: "AI Solution Architect", task: "Designs target state blueprints, maps data ingest topologies, and assesses API boundaries.", load: "50%" },
+        { role: "Business Analyst", task: "Documents process bottlenecks, maps manual cycle times, and catalogs user stories.", load: "100%" },
+        { role: "Document Analyst", task: "Audits corporate playbooks, identifies data silos, and classifies unstructured files.", load: "50%" }
+      ];
+    } else if (model === "Production Rollout") {
+      return [
+        { role: "AI Delivery Architect", task: "Defines scalable enterprise infrastructure, multi-agent orchestrations, and secure vector nodes.", load: "100%" },
+        { role: "Project Manager", task: "Orchestrates agile deployment tracks, handles release alignment, and manages SLA gates.", load: "100%" },
+        { role: "DevOps & Cloud Engineer", task: "Configures secure VPC, deployment pipelines, key vaults, and automatic failovers.", load: "70%" },
+        { role: "Data Engineer", task: "Builds production ETL connections, database triggers, and delta-lake sync pipelines.", load: "80%" },
+        { role: "Full-Stack Team (x2)", task: "Develops the client dashboard UI, review screens, and backend orchestration microservices.", load: "100%" },
+        { role: "Change Management Lead", task: "Executes consultant training programs, tracks adoption KPIs, and writes user SOP manuals.", load: "60%" }
+      ];
+    } else if (model === "Managed AI Governance Retainer") {
+      return [
+        { role: "AI Compliance Officer", task: "Monitors bias signals, reviews GDPR logs, and handles model validation audits.", load: "100%" },
+        { role: "AI Architect", task: "Implements model drift triggers, validates guardrail regex controls, and evaluates LLM runs.", load: "30%" },
+        { role: "QA Engineer", task: "Maintains golden testing datasets, validates regression test metrics, and reviews logs.", load: "50%" }
+      ];
+    } else if (model === "AI Enablement + Training Program") {
+      return [
+        { role: "AI Transformation Facilitator", task: "Curates organizational enablement blueprints, runs training academies, and tracks adoption.", load: "100%" },
+        { role: "Solution Architect", task: "Assists business leaders in scoping custom sandbox scripts and prompt frameworks.", load: "40%" },
+        { role: "BA / Content Specialist", task: "Adapts technical training assets to match business user terminology and playbooks.", load: "100%" }
+      ];
+    } else {
+      // Default: Pilot MVP Build
+      return [
+        { role: "AI Product Lead", task: "Owns MVP feature prioritization, aligns delivery checkpoints, and shapes pilot scopes.", load: "100%" },
+        { role: "LLM / RAG Engineer", task: "Configures parsing scripts, creates embedding vectors, and constructs orchestration nodes.", load: "100%" },
+        { role: "Full-Stack Engineer", task: "Develops responsive client-facing review dashboard screens and mounts API routes.", load: "100%" },
+        { role: "QA / Evaluation Specialist", task: "Measures model hallucination rates, writes evaluation checks, and audits datasets.", load: "50%" },
+        { role: "Security & Trust Auditor", task: "Reviews sanitization gates, GDPR/PII scrubbers, and SOC2 access compliance.", load: "30%" }
+      ];
+    }
   };
 
   // --- RENDERS ---
@@ -1577,6 +1809,7 @@ export default function Home() {
                 { id: "risks", label: "Risk & Governance", icon: Shield },
                 { id: "pilot", label: "Recommended Pilot", icon: Sparkles },
                 { id: "roadmap", label: "90-Day Roadmap", icon: Calendar },
+                { id: "commercial", label: "Commercial Strategy", icon: Coins },
                 { id: "export", label: "Strategy Asset Generator", icon: Download }
               ].map(sub => {
                 const active = insightsSubTab === sub.id;
@@ -2391,6 +2624,273 @@ export default function Home() {
                   </div>
                 </div>
               )}
+
+              {/* Commercial Strategy Sub-Tab */}
+              {insightsSubTab === "commercial" && (() => {
+                const rec = getEngagementRecommendation();
+                const pricing = getCalibratedPricing(rec);
+                const justifications = getPricingJustifications();
+                const team = getDeliveryTeam(rec.model);
+
+                const architectureLayers = [
+                  {
+                    id: "systems",
+                    label: "Client Documents & Systems",
+                    purpose: "Establish data access over existing corporate files and business databases.",
+                    components: "Proprietary playbook PDFs, Word templates, incident ticket histories, Salesforce pipeline objects.",
+                    controls: "Restricted read-only database connections, local staging storage, tenant separation."
+                  },
+                  {
+                    id: "ingestion",
+                    label: "Ingestion & Parsing Layer",
+                    purpose: "Clean, chunk, and extract structural metadata from unstructured files.",
+                    components: "OCR document parsers, layout-aware markdown splitters, semantic chunking pipelines.",
+                    controls: "File size validation limits, automated PII scrubbing (regex filters), source file hash tracking."
+                  },
+                  {
+                    id: "knowledge",
+                    label: "Knowledge Base / Vector Store",
+                    purpose: "Index documents to support low-latency semantic keyword and context retrieval.",
+                    components: "ChromaDB, Pinecone, or PostgreSQL pgvector store; OpenAI text-embedding-3-small embeddings.",
+                    controls: "Strict partition checks on tenant_id, data encryption-at-rest, automatic vector pruning."
+                  },
+                  {
+                    id: "orchestration",
+                    label: "LLM Orchestration Layer",
+                    purpose: "Run stateful multi-agent pipelines to generate grounded solution plans and opportunity maps.",
+                    components: "LangGraph workflows, state managers, system prompt routers, context-window managers.",
+                    controls: "Input rate limits, fallbacks to local fallback agents during API timeouts, context window size audits."
+                  },
+                  {
+                    id: "guardrails",
+                    label: "Guardrails & Human Review",
+                    purpose: "Protect organizational credibility by filtering hallucinations and enabling consultant audit overrides.",
+                    components: "Regex sanitizers, custom toxic classifications, in-console consultant approval screens.",
+                    controls: "Block models from saving directly to final exports, require 'approved' tag toggle in Human Review Mode."
+                  },
+                  {
+                    id: "copilot",
+                    label: "Business Copilot Interface",
+                    purpose: "Expose secure advisory dashboards, opportunity maps, and roadmap timeline controls to consultants.",
+                    components: "Next.js 15 Tailwind/CSS UI, React charts (radar, bar), strategy asset generator download modules.",
+                    controls: "OAuth2 authentication with JWT tokens, session lifecycle timeout, complete action audit logging."
+                  },
+                  {
+                    id: "monitoring",
+                    label: "Monitoring & Governance",
+                    purpose: "Track model accuracy, performance delays, token expenditures, and user feedback.",
+                    components: "Arize Phoenix, LangSmith dashboard integrations, custom user correction logs.",
+                    controls: "Automatic threshold alarms for latency > 5s, token burn rate caps, periodic drift eval audits."
+                  }
+                ];
+
+                return (
+                  <div className="space-y-6 animate-fade-in">
+                    <div>
+                      <h3 className="text-base font-bold flex items-center gap-2">
+                        <Coins className="w-5 h-5 text-blue-500 glow-subtle" />
+                        <span>Commercial Strategy &amp; Implementation Architecture</span>
+                      </h3>
+                      <p className="text-xs text-slate-400 mt-1">
+                        Dynamic commercial scoping and target blueprints translating readiness indexes into strategic engagement plans.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                      
+                      {/* Left Side: Scoping & Investment */}
+                      <div className="lg:col-span-2 space-y-6">
+                        
+                        {/* Engagement Model & Pricing Card */}
+                        <div className="glass-panel p-6 rounded-2xl bg-gradient-to-r from-blue-950/20 to-indigo-950/20 border-blue-500/20 relative overflow-hidden">
+                          <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 blur-2xl rounded-full" />
+                          
+                          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-800 pb-4 mb-4">
+                            <div>
+                              <span className="text-[10px] uppercase font-extrabold text-blue-400 tracking-wider">Recommended Engagement Model</span>
+                              <h4 className="text-lg font-bold text-slate-100 mt-1">{rec.model}</h4>
+                            </div>
+                            <div className="bg-slate-950/60 border border-slate-800 rounded-xl px-4 py-2 text-right">
+                              <span className="text-[10px] uppercase font-bold text-slate-500 block">Indicative Investment</span>
+                              <span className="text-xl font-extrabold text-gradient">{pricing}</span>
+                            </div>
+                          </div>
+
+                          <div className="space-y-3">
+                            <div>
+                              <span className="text-[10px] text-slate-400 font-bold uppercase">Strategic Focus:</span>
+                              <p className="text-xs text-slate-200 font-semibold mt-0.5">{rec.pilotName}</p>
+                            </div>
+                            <div>
+                              <span className="text-[10px] text-slate-400 font-bold uppercase">Model Rationale:</span>
+                              <p className="text-xs text-slate-300 leading-relaxed mt-0.5">{rec.rationale}</p>
+                            </div>
+                            <div className="mt-4 pt-3 border-t border-slate-800 flex items-center gap-2 text-[10px] text-slate-400">
+                              <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                              <span>
+                                <strong>Scoping Disclaimer:</strong> Range is indicative, assumption-based, and subject to discovery validation.
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Pricing Justification Panel */}
+                        <div className="glass-panel p-5 rounded-2xl space-y-4">
+                          <h4 className="text-xs font-extrabold text-slate-300 uppercase tracking-widest">Scoping &amp; Pricing Justification</h4>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {justifications.map((item, idx) => (
+                              <div key={idx} className="p-3 bg-slate-950/50 border border-slate-800 rounded-xl space-y-1">
+                                <span className="text-xs font-bold text-slate-200 block">{item.title}</span>
+                                <p className="text-[10px] text-slate-400 leading-relaxed">{item.desc}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                      </div>
+
+                      {/* Right Side: Suggested Team Structure */}
+                      <div className="glass-panel p-5 rounded-2xl space-y-4">
+                        <div>
+                          <h4 className="text-xs font-extrabold text-slate-300 uppercase tracking-widest">Recommended Delivery Team</h4>
+                          <p className="text-[10px] text-slate-400 mt-1">Strategic resource structuring calibrated for engagement execution.</p>
+                        </div>
+
+                        <div className="space-y-3 max-h-[360px] overflow-y-auto pr-1">
+                          {team.map((res, idx) => (
+                            <div key={idx} className="p-3 bg-slate-900/40 border border-slate-800 rounded-xl space-y-1.5 hover:border-slate-700 transition-all">
+                              <div className="flex justify-between items-center gap-2">
+                                <span className="text-xs font-bold text-slate-200">{res.role}</span>
+                                <span className="text-[9px] bg-blue-950/50 border border-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded font-extrabold">{res.load} Allocation</span>
+                              </div>
+                              <p className="text-[10px] text-slate-400 leading-relaxed">{res.task}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                    </div>
+
+                    {/* Implementation Architecture Chevron Section */}
+                    <div className="glass-panel p-6 rounded-2xl space-y-6">
+                      <div>
+                        <h4 className="text-xs font-extrabold text-slate-300 uppercase tracking-widest">Target Implementation Architecture</h4>
+                        <p className="text-[10px] text-slate-400 mt-1">Recommended end-to-end data pipelines, orchestration layers, and human gates.</p>
+                      </div>
+
+                      {/* Chevrons Flow */}
+                      <div className="flex flex-wrap lg:flex-nowrap gap-2 items-center justify-between">
+                        {architectureLayers.map((layer, idx) => {
+                          const active = activeArchLayer === layer.id;
+                          return (
+                            <React.Fragment key={layer.id}>
+                              <button
+                                onClick={() => setActiveArchLayer(layer.id)}
+                                className={`flex-1 min-w-[120px] text-left p-3 rounded-xl border transition-all relative ${active ? "bg-blue-950/20 border-blue-500 text-white glow-subtle" : "bg-slate-950/50 border-slate-800 text-slate-400 hover:border-slate-700"}`}
+                              >
+                                <span className="text-[9px] text-slate-500 font-extrabold block uppercase mb-1">Layer {idx + 1}</span>
+                                <span className="text-[10px] font-bold block leading-tight">{layer.label}</span>
+                                {active && (
+                                  <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-blue-500 rotate-45" />
+                                )}
+                              </button>
+                              {idx < architectureLayers.length - 1 && (
+                                <ArrowRight className="w-4 h-4 text-slate-700 shrink-0 hidden lg:block" />
+                              )}
+                            </React.Fragment>
+                          );
+                        })}
+                      </div>
+
+                      {/* Selected Layer Details Panel */}
+                      {(() => {
+                        const currentLayer = architectureLayers.find(l => l.id === activeArchLayer) ?? architectureLayers[0];
+                        return (
+                          <div className="p-5 bg-slate-950 border border-slate-800 rounded-xl grid grid-cols-1 md:grid-cols-3 gap-6 animate-fade-in">
+                            <div className="space-y-1">
+                              <span className="text-[9px] uppercase font-bold text-blue-400 block tracking-wider">Operational Purpose</span>
+                              <h5 className="text-sm font-bold text-slate-200">{currentLayer.label}</h5>
+                              <p className="text-xs text-slate-400 mt-2 leading-relaxed">{currentLayer.purpose}</p>
+                            </div>
+                            <div className="space-y-1 border-t md:border-t-0 md:border-l border-slate-800 pt-4 md:pt-0 md:pl-6">
+                              <span className="text-[9px] uppercase font-bold text-emerald-400 block tracking-wider">Recommended Components</span>
+                              <p className="text-xs text-slate-300 mt-2 leading-relaxed">{currentLayer.components}</p>
+                            </div>
+                            <div className="space-y-1 border-t md:border-t-0 md:border-l border-slate-800 pt-4 md:pt-0 md:pl-6">
+                              <span className="text-[9px] uppercase font-bold text-amber-500 block tracking-wider">Risk &amp; Control Considerations</span>
+                              <p className="text-xs text-slate-300 mt-2 leading-relaxed">{currentLayer.controls}</p>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+
+                    {/* Phased Plan & Expansion Path */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      
+                      {/* Phased Plan */}
+                      <div className="glass-panel p-5 rounded-2xl space-y-4">
+                        <div>
+                          <h4 className="text-xs font-extrabold text-slate-300 uppercase tracking-widest">Phase-Wise Delivery Plan</h4>
+                          <p className="text-[10px] text-slate-400 mt-1">Standardized implementation sequence from initial discovery through scaling.</p>
+                        </div>
+
+                        <div className="space-y-4 relative pl-4 border-l border-slate-800 mt-2">
+                          {[
+                            { phase: "Phase 1: Discovery & Design", dur: "1–2 weeks", desc: "Confirm pilot boundaries, map data directories, establish compliance baselines, and design prompt architectures." },
+                            { phase: "Phase 2: MVP Build", dur: "3–6 weeks", desc: "Construct operational ingestion workflows, mount primary prompt graphs, and integrate human override controls." },
+                            { phase: "Phase 3: Validation & Eval", dur: "2–4 weeks", desc: "Audit model drift metrics, execute internal red-teaming, run user tests, and confirm data security." },
+                            { phase: "Phase 4: Scaling & Rollout", dur: "4–8 weeks", desc: "Secure multi-tenant deploy, launch enterprise training clinics, enforce token spend limit triggers, and establish helpdesks." }
+                          ].map((ph, idx) => (
+                            <div key={idx} className="relative space-y-1">
+                              <div className="absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full bg-blue-600 border-2 border-slate-950" />
+                              <div className="flex justify-between items-center gap-2">
+                                <span className="text-xs font-bold text-slate-200">{ph.phase}</span>
+                                <span className="text-[9px] font-bold text-blue-400 bg-blue-950/20 px-1.5 py-0.5 rounded border border-blue-500/10">{ph.dur}</span>
+                              </div>
+                              <p className="text-[10px] text-slate-400 leading-relaxed">{ph.desc}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Expansion Path */}
+                      <div className="glass-panel p-5 rounded-2xl space-y-4">
+                        <div>
+                          <h4 className="text-xs font-extrabold text-slate-300 uppercase tracking-widest">Enterprise Scaling &amp; Expansion Path</h4>
+                          <p className="text-[10px] text-slate-400 mt-1">Multi-stage expansion roadmaps turning initial pilots into full AI operating ecosystems.</p>
+                        </div>
+
+                        {/* Progression Stepper */}
+                        <div className="grid grid-cols-1 gap-3 mt-2">
+                          {[
+                            { step: "Step 1: Immediate Pilot Focus", label: rec.pilotName, desc: "Solve near-term friction and build baseline trust." },
+                            { step: "Step 2: Near-Term Scaling", label: "Internal Advisory Knowledge Assistant", desc: "Scale semantic document grounding across multi-department files." },
+                            { step: "Step 3: Process Optimization", label: "Autonomous Support Triage Router", desc: "Automate incident logs routing and ticket classification pipeline." },
+                            { step: "Step 4: Continuous Audits", label: "Contract Policy Audit Assistant", desc: " GDPR-compliant contract policy scanning on supplier files." },
+                            { step: "Step 5: Full Maturity Model", label: "AI Governance & Token Dashboard", desc: "Centrally track LLM spends, accuracy metrics, and security logs." }
+                          ].map((prog, idx) => (
+                            <div key={idx} className="flex gap-3 items-start p-2.5 bg-slate-900/40 border border-slate-800 rounded-xl hover:border-slate-700 transition-all">
+                              <div className="w-5 h-5 rounded bg-blue-950/50 border border-blue-500/20 flex items-center justify-center text-[10px] font-extrabold text-blue-400 shrink-0">
+                                {idx + 1}
+                              </div>
+                              <div className="space-y-0.5">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="text-[9px] uppercase font-bold text-slate-500">{prog.step}</span>
+                                  <span className="text-slate-700 text-xs">•</span>
+                                  <span className="text-[10px] text-blue-400 font-bold">{prog.label}</span>
+                                </div>
+                                <p className="text-[10px] text-slate-400 leading-relaxed">{prog.desc}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* I: Strategy Asset Generator export downloads panel */}
               {insightsSubTab === "export" && (
