@@ -388,20 +388,32 @@ class LLMRouter:
                     {
                         "data_readiness": round(max(0.0, min(100.0, data_score)), 1),
                         "data_justification": f"Data is spread across {', '.join(current_tools[:3]) or 'multiple internal systems'}, and pain points such as {', '.join(pain_points[:2]) or 'manual silos'} indicate uneven structure and accessibility.",
-                        "process_readiness": round(max(0.0, min(100.0, process_score)), 1),
+                        "process_readiness": round(
+                            max(0.0, min(100.0, process_score)), 1
+                        ),
                         "process_justification": f"Manual bottlenecks around {', '.join(pain_points[:2]) or 'repetitive workflows'} suggest repeatable work exists, but standard operating flows are not yet consistently systematized.",
-                        "integration_readiness": round(max(0.0, min(100.0, integration_score)), 1),
+                        "integration_readiness": round(
+                            max(0.0, min(100.0, integration_score)), 1
+                        ),
                         "integration_justification": f"The current tool stack ({', '.join(current_tools[:3]) or 'core business tools'}) provides a base for integration, but the operating model still relies on human handoffs rather than shared middleware or APIs.",
-                        "governance_readiness": round(max(0.0, min(100.0, governance_score)), 1),
+                        "governance_readiness": round(
+                            max(0.0, min(100.0, governance_score)), 1
+                        ),
                         "governance_justification": f"Compliance obligations ({', '.join(compliance) or 'general governance requirements'}) are visible, but AI-specific review controls and auditable approval gates are not yet strongly evidenced.",
-                        "security_readiness": round(max(0.0, min(100.0, security_score)), 1),
+                        "security_readiness": round(
+                            max(0.0, min(100.0, security_score)), 1
+                        ),
                         "security_justification": "Existing compliance and enterprise tooling provide a workable security baseline, though sensitive workflow protections still need to be enforced consistently for AI-assisted outputs.",
                         "team_readiness": round(max(0.0, min(100.0, team_score)), 1),
                         "team_justification": "Leadership has identified AI goals, but the prompt provides limited evidence of formal upskilling, change management, or internal AI operating ownership.",
-                        "business_alignment": round(max(0.0, min(100.0, alignment_score)), 1),
+                        "business_alignment": round(
+                            max(0.0, min(100.0, alignment_score)), 1
+                        ),
                         "alignment_justification": f"The stated goals and derived use cases, especially {top_use_case}, map clearly to delivery speed, cost reduction, or client responsiveness outcomes.",
                         "overall_score": round(overall, 1),
-                        "automation_potential": round(max(0.0, min(100.0, automation)), 1),
+                        "automation_potential": round(
+                            max(0.0, min(100.0, automation)), 1
+                        ),
                         "readiness_interpretation": f"{company or 'The client'} shows moderate AI readiness overall, with the clearest strength in business alignment and the biggest gap in team and integration maturity. The most defensible near-term move is a controlled pilot around {top_use_case}. Strengthen review workflows and adoption ownership before broader rollout.",
                     }
                 )

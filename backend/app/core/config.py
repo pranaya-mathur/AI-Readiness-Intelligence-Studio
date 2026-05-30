@@ -59,9 +59,7 @@ class Settings(BaseSettings):
     OLLAMA_REASONING_MODEL: str = os.getenv(
         "OLLAMA_REASONING_MODEL", "qwen2.5:7b"
     )  # fallback: llama3:8b
-    OLLAMA_STRUCTURED_MODEL: str = os.getenv(
-        "OLLAMA_STRUCTURED_MODEL", "llama3:8b"
-    )
+    OLLAMA_STRUCTURED_MODEL: str = os.getenv("OLLAMA_STRUCTURED_MODEL", "llama3:8b")
     OLLAMA_LIGHTWEIGHT_MODEL: str = os.getenv(
         "OLLAMA_LIGHTWEIGHT_MODEL", "phi3.5:latest"
     )

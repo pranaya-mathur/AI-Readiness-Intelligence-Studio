@@ -545,7 +545,9 @@ Write a 3-sentence executive summary that:
         "recommended_pilot": pilot,
         "proposal_summary": proposal,
         "logs": state.logs
-        + ["Proposal Writing Agent designed pilot card and budget model from client context."],
+        + [
+            "Proposal Writing Agent designed pilot card and budget model from client context."
+        ],
         "current_node": "proposal_writing",
     }
 
