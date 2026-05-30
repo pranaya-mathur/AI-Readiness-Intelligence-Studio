@@ -25,6 +25,10 @@ jobs:
       - name: Checkout Codebase
         uses: actions/checkout@v4
 
+      - name: Lowercase Repository Name
+        run: |
+          echo "REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
       - name: Setup QEMU for Multi-Platform Emulation
         uses: docker/setup-qemu-action@v3
 
@@ -47,10 +51,10 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}/backend:latest
-            ghcr.io/${{ github.repository }}/backend:${{ github.sha }}
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}/backend:cache
-          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}/backend:cache,mode=max
+            ghcr.io/${{ env.REPO_LOWER }}/backend:latest
+            ghcr.io/${{ env.REPO_LOWER }}/backend:${{ github.sha }}
+          cache-from: type=registry,ref=ghcr.io/${{ env.REPO_LOWER }}/backend:cache
+          cache-to: type=registry,ref=ghcr.io/${{ env.REPO_LOWER }}/backend:cache,mode=max
 
       # Compile & Publish Frontend Image
       - name: Package & Push Frontend Container Image
@@ -61,10 +65,10 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}/frontend:latest
-            ghcr.io/${{ github.repository }}/frontend:${{ github.sha }}
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}/frontend:cache
-          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}/frontend:cache,mode=max
+            ghcr.io/${{ env.REPO_LOWER }}/frontend:latest
+            ghcr.io/${{ env.REPO_LOWER }}/frontend:${{ github.sha }}
+          cache-from: type=registry,ref=ghcr.io/${{ env.REPO_LOWER }}/frontend:cache
+          cache-to: type=registry,ref=ghcr.io/${{ env.REPO_LOWER }}/frontend:cache,mode=max
 
   # ----------------------------------------------------------------------------
   # JOB 2: DEPLOYMENT TO STAGING / PRODUCTION (MANUAL GATED)
