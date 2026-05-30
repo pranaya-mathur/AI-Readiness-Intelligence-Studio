@@ -29,6 +29,17 @@ def _title_from_phrase(phrase: str) -> str:
     return " ".join(word.capitalize() for word in words[:4])
 
 
+def _coerce_float(value: object, default: float) -> float:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return default
+    return default
+
+
 class LLMRouter:
     @staticmethod
     def generate_completion(
@@ -478,7 +489,7 @@ class LLMRouter:
                             "department": pilot.get("department", departments[0]),
                             "why": f"{pilot.get('use_case_name')} best fits the current context because it directly addresses observed bottlenecks and offers the strongest value-to-complexity ratio for a first deployment. The supporting evidence is {pilot.get('evidence', 'grounded in the documented workflow pain points')}.",
                             "expected_impact": "Reduce manual turnaround time by 25-40% in the first pilot scope while improving response consistency and evidence reuse.",
-                            "confidence": float(pilot.get("confidence", 84.0)),
+                            "confidence": _coerce_float(pilot.get("confidence"), 84.0),
                             "complexity": pilot.get("complexity", "Medium"),
                             "estimated_duration_weeks": duration,
                         },
