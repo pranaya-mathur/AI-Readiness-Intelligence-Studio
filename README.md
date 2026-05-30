@@ -9,9 +9,45 @@ AI Readiness Intelligence Studio is an AI Transformation Discovery Platform. It 
 ## Technical Architecture Highlight
 
 1. **Stateful Multi-Agent Core**: Orchestrated using `LangGraph` across 9 nodes representing specialized agents processing state sequentially.
-2. **LLM Adaptive Routing**: Automatically routes queries to **Groq** (`llama-3.3-70b-versatile`) as the primary intelligence layer. Falls back securely to local **Ollama** models (`qwen3.5:9b`, `llama3:8b`, `qwen2.5-coder:14b`, `phi3.5:latest`) or high-fidelity mockup templates if offline.
+2. **LLM Adaptive Routing**: Automatically routes queries to **Groq** (`llama-3.3-70b-versatile`) as the primary intelligence layer when `GROQ_API_KEY` is set and `USE_OLLAMA=false`. Otherwise it runs locally on **Ollama** models (`qwen2.5:7b`, `llama3:8b`, `phi3.5:latest`) or high-fidelity mockup templates if offline.
 3. **Dual Database Engine**: Attempts PostgreSQL + `pgvector` inside the container cluster and falls back to SQLite + a customized python-in-memory vector store on local developer machines instantly.
 4. **Rich Exporters**: PDF (custom styled grids), DOCX (Word proposals), and PPTX (slide decks).
+
+## GCP Demo Deployment Architecture
+
+The Terraform-based GCP demo deployment uses a single Compute Engine VM and persists Ollama model data in a dedicated GCS bucket mounted with `gcsfuse`.
+
+```mermaid
+flowchart LR
+    U["User / Browser"] --> FE["Frontend<br/>Next.js on port 3000"]
+    FE --> BE["Backend<br/>FastAPI on port 8000"]
+    BE --> DB["Postgres + pgvector<br/>Docker container"]
+    BE --> OL["Ollama API<br/>port 11434"]
+    OL --> M["/root/.ollama<br/>mounted from GCS bucket via gcsfuse"]
+
+    subgraph GCP["GCP Project: youth-dev-ai"]
+      VM["Compute Engine VM<br/>Ubuntu 24.04<br/>e2-standard-4"]
+      BUCKET["Cloud Storage Bucket<br/>youth-dev-ai-ollama-models-demo"]
+      SA["Service Account<br/>storage.objectAdmin on bucket"]
+    end
+
+    FE -. runs on .-> VM
+    BE -. runs on .-> VM
+    DB -. runs on .-> VM
+    OL -. runs on .-> VM
+    M -. mounted inside .-> VM
+    BUCKET --> M
+    SA --> VM
+```
+
+For this deployment path:
+
+- `Frontend`, `Backend`, `Postgres`, and `Ollama` run as Docker containers on one Ubuntu VM.
+- Ollama model files are not baked into the image; they are stored in GCS and mounted into the container at `/root/.ollama`.
+- This keeps the Ollama image lightweight and lets model data survive VM recreation.
+- The working demo-safe Ollama model set is `qwen2.5:7b` and `llama3:8b`.
+- Groq is optional in this deployment. Set `groq_api_key` and switch `USE_OLLAMA=false` only if you want Groq to become the primary path.
+- Important: with the current Terraform defaults, a full `terraform destroy` also deletes the bucket because it is still managed by Terraform with `force_destroy = true`. To preserve models, destroy only the VM resources or remove the bucket from the destroy scope.
 
 ---
 

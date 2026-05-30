@@ -229,64 +229,108 @@ def ai_use_case_node(state: AssessmentState) -> Dict[str, Any]:
 def readiness_scoring_node(state: AssessmentState) -> Dict[str, Any]:
     logger.info("Running Node: Readiness Scoring...")
 
-    # Heuristic scoring engine based on goals, cloud, tools, and compliance count
-    # Base starting point
-    data_score = 65.0
-    process_score = 60.0
-    integration_score = 55.0
-    governance_score = 58.0
-    security_score = 70.0
-    team_score = 50.0
-    alignment_score = 68.0
+    prompt = f"""
+You are a Senior AI Readiness Analyst with 15+ years of enterprise transformation experience.
+Your job is to produce a rigorous, defensible AI Readiness Scorecard for a real client.
 
-    # Apply weights & dynamic variations based on intake checkboxes
-    if "Data Silos" in state.pain_points:
-        data_score -= 15.0
-    if "Manual Process Overload" in state.pain_points:
-        process_score -= 10.0
-    if "Cloud-agnostic" in state.cloud_preference:
-        integration_score += 10.0
-    if len(state.compliance_requirements) > 2:
-        governance_score -= 10.0
-        security_score += 5.0
+## Client Profile
+- Company: {state.company_name}
+- Industry: {state.industry}
+- Departments: {", ".join(state.departments)}
+- Current Tools: {", ".join(state.current_tools)}
+- Pain Points: {", ".join(state.pain_points)}
+- AI Goals: {", ".join(state.ai_goals)}
+- Cloud Preference: {state.cloud_preference}
+- Compliance Requirements: {", ".join(state.compliance_requirements)}
+- Identified Bottlenecks: {json.dumps(state.bottlenecks)}
+- Identified Use Cases: {json.dumps(state.use_cases)}
 
-    # Example formula for Overall AI Readiness (weighted):
-    # Data 20% + Process 15% + Integration 15% + Governance 15% + Security 15% + Team 10% + Business Alignment 10%
-    overall = (
-        (data_score * 0.20)
-        + (process_score * 0.15)
-        + (integration_score * 0.15)
-        + (governance_score * 0.15)
-        + (security_score * 0.15)
-        + (team_score * 0.10)
-        + (alignment_score * 0.10)
-    )
+## Scoring Instructions
+Score each dimension from 0–100 based on the evidence above.
+Be critical — most enterprises score 45–70, not 80+.
+For each dimension, provide a 1-sentence justification tied to specific client evidence.
 
-    # Automation potential average
-    automation = 28.0
-    if "Efficiency / Cost Reduction" in state.ai_goals:
-        automation += 5.0
+Scoring rubric:
+- data_readiness: Quality, accessibility, and structure of data assets. Penalize for Data Silos, Excel-heavy workflows, no data warehouse.
+- process_readiness: How standardized and documented the processes are. Penalize for Manual Process Overload, tribal knowledge.
+- integration_readiness: API maturity, cloud-native stack, ability to connect systems. Reward cloud-agnostic or modern stack.
+- governance_readiness: Data governance policies, AI ethics policies, audit trails. Penalize for heavy compliance requirements without governance tooling.
+- security_readiness: Data security posture, compliance certifications, access controls. Reward regulated industry experience.
+- team_readiness: AI/ML talent, change management culture, executive sponsorship. Penalize if no AI goals mention upskilling.
+- business_alignment: How clearly AI goals map to revenue, cost, or customer outcomes. Reward specific, measurable goals.
 
-    interpretation = (
-        f"With an overall score of {int(overall)}/100, the company shows strong fundamentals in Security "
-        f"({int(security_score)}/100) but immediate improvement areas in Team Preparedness ({int(team_score)}/100) "
-        f"and Integration ({int(integration_score)}/100). Automating invoice workflows and ticket routers represents a P1 quick win."
-    )
+Overall score = weighted average:
+data(20%) + process(15%) + integration(15%) + governance(15%) + security(15%) + team(10%) + alignment(10%)
+
+Automation potential = estimated % of current manual work automatable within 12 months based on identified bottlenecks and use cases.
+
+## Output Format (strict JSON)
+{{
+    "data_readiness": <float>,
+    "data_justification": "<one sentence tied to client evidence>",
+    "process_readiness": <float>,
+    "process_justification": "<one sentence tied to client evidence>",
+    "integration_readiness": <float>,
+    "integration_justification": "<one sentence tied to client evidence>",
+    "governance_readiness": <float>,
+    "governance_justification": "<one sentence tied to client evidence>",
+    "security_readiness": <float>,
+    "security_justification": "<one sentence tied to client evidence>",
+    "team_readiness": <float>,
+    "team_justification": "<one sentence tied to client evidence>",
+    "business_alignment": <float>,
+    "alignment_justification": "<one sentence tied to client evidence>",
+    "overall_score": <float>,
+    "automation_potential": <float>,
+    "readiness_interpretation": "<3-sentence narrative: overall posture, top strength, top gap, recommended first action>"
+}}
+"""
+
+    json_str = LLMRouter.generate_completion(prompt, require_json=True)
+    try:
+        data = json.loads(json_str)
+        score_keys = [
+            "data_readiness",
+            "process_readiness",
+            "integration_readiness",
+            "governance_readiness",
+            "security_readiness",
+            "team_readiness",
+            "business_alignment",
+            "overall_score",
+        ]
+        for key in score_keys:
+            if key in data:
+                data[key] = round(max(0.0, min(100.0, float(data[key]))), 1)
+        data["automation_potential"] = round(
+            max(0.0, min(100.0, float(data.get("automation_potential", 30.0)))), 1
+        )
+    except Exception:
+        data = {
+            "data_readiness": 55.0,
+            "data_justification": f"Data is fragmented across {', '.join(state.current_tools[:3]) or 'multiple business systems'}, which limits reliable AI access without cleanup.",
+            "process_readiness": 52.0,
+            "process_justification": f"Pain points such as {', '.join(state.pain_points[:2]) or 'manual process overload'} indicate repeatable work, but the process flow is still largely manual.",
+            "integration_readiness": 50.0,
+            "integration_justification": f"The current stack ({', '.join(state.current_tools[:3]) or 'existing tools'}) is workable, but there is limited evidence of shared middleware or mature API connectivity.",
+            "governance_readiness": 56.0,
+            "governance_justification": f"Compliance requirements like {', '.join(state.compliance_requirements[:3]) or 'baseline governance needs'} are present, but AI-specific guardrails are not yet strongly defined.",
+            "security_readiness": 68.0,
+            "security_justification": "The organization appears to have a baseline enterprise security posture, but AI-specific data handling controls still need structured enforcement.",
+            "team_readiness": 49.0,
+            "team_justification": "The intake shows interest in AI outcomes, but does not provide strong evidence of training, operating ownership, or change management readiness.",
+            "business_alignment": 70.0,
+            "alignment_justification": "The proposed AI goals map directly to cost reduction and workflow acceleration, which supports a focused pilot recommendation.",
+            "overall_score": 57.6,
+            "automation_potential": 35.0,
+            "readiness_interpretation": "Overall readiness is moderate, with the clearest strength in business alignment and the largest gap in team preparedness. The company can justify a scoped pilot, but should avoid broad rollout before process and governance controls mature. Start with one high-value workflow where human review remains mandatory.",
+        }
 
     return {
-        "data_readiness": round(max(0.0, min(100.0, data_score)), 1),
-        "process_readiness": round(max(0.0, min(100.0, process_score)), 1),
-        "integration_readiness": round(max(0.0, min(100.0, integration_score)), 1),
-        "governance_readiness": round(max(0.0, min(100.0, governance_score)), 1),
-        "security_readiness": round(max(0.0, min(100.0, security_score)), 1),
-        "team_readiness": round(max(0.0, min(100.0, team_score)), 1),
-        "business_alignment": round(max(0.0, min(100.0, alignment_score)), 1),
-        "overall_score": round(overall, 1),
-        "automation_potential": round(automation, 1),
-        "readiness_interpretation": interpretation,
+        **data,
         "logs": state.logs
         + [
-            f"Readiness Scoring Agent evaluated score categories. Overall: {int(overall)}/100."
+            f"Readiness Scoring Agent evaluated score categories. Overall: {int(data.get('overall_score', 0))}/100."
         ],
         "current_node": "readiness_scoring",
     }
@@ -400,36 +444,108 @@ def roadmap_planning_node(state: AssessmentState) -> Dict[str, Any]:
 # 8. Proposal Writing Agent
 def proposal_writing_node(state: AssessmentState) -> Dict[str, Any]:
     logger.info("Running Node: Proposal Writing...")
-    # Highlight the first P1 use case as the recommended pilot
-    pilot = {
-        "name": "Intelligent Pre-Sales Proposal Copilot",
-        "why": "High business value, document-heavy process, low initial complexity, and ideal for a controlled AI rollout that establishes immediate consultant adoption.",
-        "expected_impact": "Reduces first-draft proposal preparation from 2–3 days to under 30 minutes, while improving reuse of approved content, consistency, and senior review efficiency.",
-        "confidence": 92.0,
-    }
+    prompt = f"""
+You are a Principal AI Solutions Architect and Proposal Strategist at a top-tier consulting firm.
+Your job is to generate a commercially precise, client-ready AI Enablement Proposal.
+This proposal will be handed directly to the client's CTO and CFO — it must be specific, credible, and grounded in their actual context.
 
-    if state.use_cases:
-        p1s = [u for u in state.use_cases if u.get("priority") == "P1"]
-        if p1s:
-            first_p1 = p1s[0]
-            pilot["name"] = first_p1.get("use_case_name")
-            pilot["why"] = f"Identified as P1 because {first_p1.get('evidence')}"
-            pilot["expected_impact"] = (
-                f"High value opportunity offering '{first_p1.get('value').lower()}' return potential."
-            )
-            pilot["confidence"] = first_p1.get("confidence", 90.0)
+## Client Context
+- Company: {state.company_name}
+- Industry: {state.industry}
+- Company Size / Departments: {", ".join(state.departments)}
+- Pain Points: {", ".join(state.pain_points)}
+- AI Goals: {", ".join(state.ai_goals)}
+- Compliance Requirements: {", ".join(state.compliance_requirements)}
+- Cloud Preference: {state.cloud_preference}
+- Current Tools: {", ".join(state.current_tools)}
+- Overall AI Readiness Score: {state.overall_score}/100
+- Identified Use Cases: {json.dumps(state.use_cases)}
+- Identified Bottlenecks: {json.dumps(state.bottlenecks)}
+- Identified Risks: {json.dumps(state.risks)}
+- 90-Day Roadmap: {json.dumps(state.roadmap_items)}
 
-    proposal = {
-        "title": f"AI Enablement Strategy Proposal: {state.company_name}",
-        "est_budget": "$45,000 - $60,000",
-        "roi_projection": "ROI achieved within 4.5 months of operations deployment",
-    }
+## Instructions
+
+### Recommended Pilot
+Select the single best P1 use case as the recommended pilot project.
+Justify the selection using specific evidence from bottlenecks, goals, and readiness score.
+The pilot should be the one with highest value-to-complexity ratio and lowest risk.
+
+### Budget Estimation
+Estimate a realistic budget range in USD based on:
+- Industry norms for the identified use case type
+- Number of departments involved
+- Integration complexity (consider current tools and cloud preference)
+- Compliance overhead (more compliance = higher cost)
+- Typical ranges: Simple RAG/chatbot pilots = $15K–$35K | Multi-agent workflow automation = $40K–$90K | Enterprise-grade with compliance = $80K–$150K+
+
+### ROI Projection
+Estimate ROI timeline based on:
+- Automation potential score
+- Identified bottleneck severity
+- Pilot use case value rating
+- Typical ranges: High-value, low-complexity pilots = 2–4 months | Mid-complexity = 4–7 months | High-compliance/complex = 8–14 months
+
+### Executive Summary
+Write a 3-sentence executive summary that:
+1. States the client's core AI opportunity
+2. Recommends the pilot with specific expected impact
+3. Projects the business outcome if deployed within 90 days
+
+## Output Format (strict JSON)
+{{
+    "recommended_pilot": {{
+        "name": "<use case name>",
+        "department": "<department>",
+        "why": "<2-sentence justification grounded in client evidence>",
+        "expected_impact": "<specific, quantified impact statement — e.g. reduce X by Y% in Z weeks>",
+        "confidence": <float 0–100>,
+        "complexity": "<Low | Medium | High>",
+        "estimated_duration_weeks": <int>
+    }},
+    "proposal_summary": {{
+        "title": "AI Enablement Strategy Proposal: {state.company_name}",
+        "executive_summary": "<3-sentence executive summary>",
+        "est_budget": "<range in USD — e.g. $42,000 – $58,000>",
+        "roi_projection": "<specific timeline and trigger — e.g. ROI within 4–5 months post-deployment, driven by 35% reduction in manual ops overhead>",
+        "key_risks_acknowledged": ["<risk 1>", "<risk 2>"],
+        "next_step": "<single clear recommended next action for the client>"
+    }}
+}}
+"""
+
+    json_str = LLMRouter.generate_completion(prompt, require_json=True)
+    try:
+        data = json.loads(json_str)
+        pilot = data.get("recommended_pilot", {})
+        proposal = data.get("proposal_summary", {})
+    except Exception:
+        pilot = {
+            "name": "Intelligent Pre-Sales Proposal Copilot",
+            "department": "Sales & Pre-sales",
+            "why": "This use case offers the strongest value-to-complexity ratio for an initial rollout and directly addresses documented manual proposal bottlenecks. It also keeps governance risk manageable because human review can remain in the loop.",
+            "expected_impact": "Reduce first-draft proposal turnaround by 25-40% within the initial pilot scope.",
+            "confidence": 90.0,
+            "complexity": "Low",
+            "estimated_duration_weeks": 6,
+        }
+        proposal = {
+            "title": f"AI Enablement Strategy Proposal: {state.company_name}",
+            "executive_summary": f"{state.company_name} has a credible AI opportunity in repetitive knowledge work. A focused pilot around {pilot['name']} should improve cycle time without forcing a full platform transformation. If launched within 90 days, it can create measurable proof of value and a stronger case for broader rollout.",
+            "est_budget": "$20,000 - $35,000",
+            "roi_projection": "ROI within 3-5 months post-deployment, driven by faster turnaround on manual document workflows.",
+            "key_risks_acknowledged": [
+                "Weak source quality may reduce early output trust.",
+                "Governance controls may trail pilot velocity without formal review ownership.",
+            ],
+            "next_step": "Lock pilot scope, success metrics, and review owners before build kickoff.",
+        }
 
     return {
         "recommended_pilot": pilot,
         "proposal_summary": proposal,
         "logs": state.logs
-        + ["Proposal Writing Agent designed first pilot card and budget models."],
+        + ["Proposal Writing Agent designed pilot card and budget model from client context."],
         "current_node": "proposal_writing",
     }
 

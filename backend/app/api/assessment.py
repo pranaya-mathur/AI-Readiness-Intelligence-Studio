@@ -99,12 +99,19 @@ def _db_assessment_to_dict(ass: Assessment) -> dict:
         "why_recommended_pilot": ass.why_recommended_pilot,
         "expected_pilot_impact": ass.expected_pilot_impact,
         "data_readiness": ass.data_readiness,
+        "data_justification": ass.data_justification,
         "process_readiness": ass.process_readiness,
+        "process_justification": ass.process_justification,
         "integration_readiness": ass.integration_readiness,
+        "integration_justification": ass.integration_justification,
         "governance_readiness": ass.governance_readiness,
+        "governance_justification": ass.governance_justification,
         "security_readiness": ass.security_readiness,
+        "security_justification": ass.security_justification,
         "team_readiness": ass.team_readiness,
+        "team_justification": ass.team_justification,
         "business_alignment": ass.business_alignment,
+        "alignment_justification": ass.alignment_justification,
         "business_summary": ass.business_summary,
         "client_summary": ass.client_summary,
         "reviewer_notes": ass.reviewer_notes,
@@ -392,12 +399,40 @@ def upload_documents(
 
         # Score breakdown
         ass.data_readiness = final_state.get("data_readiness", 0.0)
+        ass.data_justification = sanitize_text(
+            final_state.get("data_justification"),
+            "The available data landscape appears mixed, with meaningful business information present but not yet fully standardized for AI use.",
+        )
         ass.process_readiness = final_state.get("process_readiness", 0.0)
+        ass.process_justification = sanitize_text(
+            final_state.get("process_justification"),
+            "Core workflows are repetitive enough for AI support, but they still need tighter standardization before large-scale automation.",
+        )
         ass.integration_readiness = final_state.get("integration_readiness", 0.0)
+        ass.integration_justification = sanitize_text(
+            final_state.get("integration_justification"),
+            "Current systems can support integration work, but shared middleware and clean workflow handoffs still need to be established.",
+        )
         ass.governance_readiness = final_state.get("governance_readiness", 0.0)
+        ass.governance_justification = sanitize_text(
+            final_state.get("governance_justification"),
+            "Governance requirements are visible, but AI-specific approval controls and auditability need to be strengthened.",
+        )
         ass.security_readiness = final_state.get("security_readiness", 0.0)
+        ass.security_justification = sanitize_text(
+            final_state.get("security_justification"),
+            "Baseline enterprise security controls appear present, though AI-specific data protections still require operational enforcement.",
+        )
         ass.team_readiness = final_state.get("team_readiness", 0.0)
+        ass.team_justification = sanitize_text(
+            final_state.get("team_justification"),
+            "Leadership interest is present, but adoption readiness still depends on training, operating ownership, and change management discipline.",
+        )
         ass.business_alignment = final_state.get("business_alignment", 0.0)
+        ass.alignment_justification = sanitize_text(
+            final_state.get("alignment_justification"),
+            "The most promising AI use cases are well aligned with measurable business goals such as faster delivery and lower manual effort.",
+        )
 
         # Risk assessment
         ass.risk_level = (
@@ -768,6 +803,41 @@ def create_walkthrough_workspace(
                 "automation and support triage. The most immediate value is in shortening response cycles "
                 "without forcing a large platform replacement."
             )
+        if existing_sample.data_justification is None:
+            existing_sample.data_justification = (
+                "Proposal content and operational knowledge exist across Salesforce, Excel, and SharePoint, "
+                "but the data remains fragmented enough to limit immediate AI reuse without cleanup."
+            )
+        if existing_sample.process_justification is None:
+            existing_sample.process_justification = (
+                "Several workflows are highly repetitive and suitable for AI support, but they still rely on "
+                "manual reviewer handoffs and informal execution patterns."
+            )
+        if existing_sample.integration_justification is None:
+            existing_sample.integration_justification = (
+                "Apex has mainstream enterprise systems in place, yet the operating model still depends on "
+                "human coordination rather than clean middleware or API-driven orchestration."
+            )
+        if existing_sample.governance_justification is None:
+            existing_sample.governance_justification = (
+                "GDPR and SOC2 create a credible governance baseline, but AI-specific approval trails and "
+                "output validation should still be tightened before expansion."
+            )
+        if existing_sample.security_justification is None:
+            existing_sample.security_justification = (
+                "The existing compliance posture supports a controlled pilot, especially because regulated "
+                "document handling practices are already familiar to the organization."
+            )
+        if existing_sample.team_justification is None:
+            existing_sample.team_justification = (
+                "The business has clear appetite for AI pilots, but long-term success will depend on explicit "
+                "ownership, rollout training, and stronger adoption processes."
+            )
+        if existing_sample.alignment_justification is None:
+            existing_sample.alignment_justification = (
+                "The selected AI opportunities map directly to faster proposal turnaround, improved support "
+                "responsiveness, and reduced manual operations overhead."
+            )
         if existing_sample.reviewer_notes is None:
             existing_sample.reviewer_notes = (
                 "Sample client workspace pre-reviewed for consulting walkthroughs. Reconfirm integration assumptions "
@@ -815,12 +885,19 @@ def create_walkthrough_workspace(
         risk_level="Medium",
         # Breakdown
         data_readiness=55.0,
+        data_justification="Proposal content and operational knowledge exist across Salesforce, Excel, and SharePoint, but the data remains fragmented enough to limit immediate AI reuse without cleanup.",
         process_readiness=60.0,
+        process_justification="Several workflows are highly repetitive and suitable for AI support, but they still rely on manual reviewer handoffs and informal execution patterns.",
         integration_readiness=50.0,
+        integration_justification="Apex has mainstream enterprise systems in place, yet the operating model still depends on human coordination rather than clean middleware or API-driven orchestration.",
         governance_readiness=68.0,
+        governance_justification="GDPR and SOC2 create a credible governance baseline, but AI-specific approval trails and output validation should still be tightened before expansion.",
         security_readiness=72.0,
+        security_justification="The existing compliance posture supports a controlled pilot, especially because regulated document handling practices are already familiar to the organization.",
         team_readiness=58.0,
+        team_justification="The business has clear appetite for AI pilots, but long-term success will depend on explicit ownership, rollout training, and stronger adoption processes.",
         business_alignment=75.0,
+        alignment_justification="The selected AI opportunities map directly to faster proposal turnaround, improved support responsiveness, and reduced manual operations overhead.",
         business_summary=(
             "Apex Global Consulting Partners is a mid-size professional services firm handling "
             "intensive support and operations workloads. Repeated workflows in data collation and "

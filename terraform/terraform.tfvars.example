@@ -1,0 +1,21 @@
+project_id         = "youth-dev-ai"
+env                = "demo"
+region             = "asia-south1"
+zone               = "asia-south1-a"
+machine_type       = "e2-standard-4"
+boot_disk_size_gb  = 100
+repo_url           = "https://github.com/pranaya-mathur/AI-Readiness-Intelligence-Studio"
+repo_branch        = "main"
+startup_models     = ["qwen2.5:7b", "llama3:8b"]
+bucket_force_destroy = true
+
+# Restrict this before internet-facing use.
+allowed_source_ranges = ["0.0.0.0/0"]
+
+# Example:
+# ssh_public_keys = [
+#   "ubuntu:ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... your-laptop"
+# ]
+
+secret_key   = "replace-with-a-long-random-secret"
+groq_api_key = ""

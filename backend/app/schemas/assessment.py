@@ -177,12 +177,19 @@ class AssessmentUpdate(BaseModel):
 
     # Custom score overrides
     data_readiness: Optional[float] = None
+    data_justification: Optional[str] = None
     process_readiness: Optional[float] = None
+    process_justification: Optional[str] = None
     integration_readiness: Optional[float] = None
+    integration_justification: Optional[str] = None
     governance_readiness: Optional[float] = None
+    governance_justification: Optional[str] = None
     security_readiness: Optional[float] = None
+    security_justification: Optional[str] = None
     team_readiness: Optional[float] = None
+    team_justification: Optional[str] = None
     business_alignment: Optional[float] = None
+    alignment_justification: Optional[str] = None
 
     # Interpretation text overrides
     business_summary: Optional[str] = None
@@ -225,12 +232,19 @@ class AssessmentResponse(BaseModel):
     expected_pilot_impact: Optional[str]
 
     data_readiness: float
+    data_justification: Optional[str]
     process_readiness: float
+    process_justification: Optional[str]
     integration_readiness: float
+    integration_justification: Optional[str]
     governance_readiness: float
+    governance_justification: Optional[str]
     security_readiness: float
+    security_justification: Optional[str]
     team_readiness: float
+    team_justification: Optional[str]
     business_alignment: float
+    alignment_justification: Optional[str]
 
     business_summary: Optional[str]
     readiness_interpretation: Optional[str]

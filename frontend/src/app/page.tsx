@@ -99,12 +99,19 @@ interface Assessment {
   why_recommended_pilot: string | null;
   expected_pilot_impact: string | null;
   data_readiness: number;
+  data_justification: string | null;
   process_readiness: number;
+  process_justification: string | null;
   integration_readiness: number;
+  integration_justification: string | null;
   governance_readiness: number;
+  governance_justification: string | null;
   security_readiness: number;
+  security_justification: string | null;
   team_readiness: number;
+  team_justification: string | null;
   business_alignment: number;
+  alignment_justification: string | null;
   business_summary: string | null;
   client_summary: string | null;
   reviewer_notes: string | null;
@@ -690,18 +697,32 @@ export default function Home() {
   const getRadarData = () => {
     if (!selectedAssessment) return [];
     return [
-      { subject: "Data Readiness", A: selectedAssessment.data_readiness },
-      { subject: "Process Readiness", A: selectedAssessment.process_readiness },
-      { subject: "Integration Readiness", A: selectedAssessment.integration_readiness },
-      { subject: "Governance Readiness", A: selectedAssessment.governance_readiness },
-      { subject: "Security Readiness", A: selectedAssessment.security_readiness },
-      { subject: "Team Readiness", A: selectedAssessment.team_readiness },
-      { subject: "Business Alignment", A: selectedAssessment.business_alignment }
+      { subject: "Data Readiness", A: selectedAssessment.data_readiness, justification: selectedAssessment.data_justification },
+      { subject: "Process Readiness", A: selectedAssessment.process_readiness, justification: selectedAssessment.process_justification },
+      { subject: "Integration Readiness", A: selectedAssessment.integration_readiness, justification: selectedAssessment.integration_justification },
+      { subject: "Governance Readiness", A: selectedAssessment.governance_readiness, justification: selectedAssessment.governance_justification },
+      { subject: "Security Readiness", A: selectedAssessment.security_readiness, justification: selectedAssessment.security_justification },
+      { subject: "Team Readiness", A: selectedAssessment.team_readiness, justification: selectedAssessment.team_justification },
+      { subject: "Business Alignment", A: selectedAssessment.business_alignment, justification: selectedAssessment.alignment_justification }
     ];
   };
 
   const getBarData = () => {
     return getRadarData();
+  };
+
+  const getDimensionJustification = (key: string) => {
+    if (!selectedAssessment) return null;
+    const justificationMap: Record<string, string | null> = {
+      data_readiness: selectedAssessment.data_justification,
+      process_readiness: selectedAssessment.process_justification,
+      integration_readiness: selectedAssessment.integration_justification,
+      governance_readiness: selectedAssessment.governance_justification,
+      security_readiness: selectedAssessment.security_justification,
+      team_readiness: selectedAssessment.team_justification,
+      business_alignment: selectedAssessment.alignment_justification,
+    };
+    return justificationMap[key] ?? null;
   };
 
   const selectedClient = selectedClientId
@@ -1828,7 +1849,7 @@ export default function Home() {
 
               <div className="mt-4 pt-4 border-t border-slate-800 space-y-2">
                 {/* Human Review Mode Toggle */}
-                <div className="flex items-center justify-between p-2 bg-slate-950 rounded-lg border border-slate-800">
+                <label className="flex cursor-pointer items-center justify-between p-2 bg-slate-950 rounded-lg border border-slate-800">
                   <div className="flex items-center gap-1.5">
                     <Edit3 className="w-3.5 h-3.5 text-blue-400" />
                     <span className="text-[10px] font-bold text-slate-300">Human Review Mode</span>
@@ -1839,7 +1860,7 @@ export default function Home() {
                     onChange={e => setIsReviewMode(e.target.checked)}
                     className="w-3.5 h-3.5 accent-blue-500 cursor-pointer"
                   />
-                </div>
+                </label>
 
                 {isReviewMode && (
                   <button 
@@ -2359,7 +2380,22 @@ export default function Home() {
                           <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
                           <XAxis type="number" domain={[0, 100]} tick={{ fill: "#64748b", fontSize: 8 }} />
                           <YAxis dataKey="subject" type="category" tick={{ fill: "#64748b", fontSize: 9 }} width={100} />
-                          <Tooltip contentStyle={{ backgroundColor: "#0f172a", border: "1px solid #334155", borderRadius: "8px", fontSize: 10 }} />
+                          <Tooltip
+                            contentStyle={{ backgroundColor: "#0f172a", border: "1px solid #334155", borderRadius: "8px", fontSize: 10 }}
+                            content={({ active, payload, label }) => {
+                              if (!active || !payload?.length) return null;
+                              const point = payload[0]?.payload as { A?: number; justification?: string | null } | undefined;
+                              return (
+                                <div className="max-w-[240px] rounded-lg border border-slate-700 bg-slate-950 p-3 text-[10px] text-slate-200 shadow-xl">
+                                  <p className="font-bold text-slate-100">{label}</p>
+                                  <p className="mt-1 text-blue-300">Score: {int(point?.A ?? 0)}/100</p>
+                                  {point?.justification && (
+                                    <p className="mt-2 leading-relaxed text-slate-300">{point.justification}</p>
+                                  )}
+                                </div>
+                              );
+                            }}
+                          />
                           <Bar dataKey="A" fill="#6366f1" radius={[0, 4, 4, 0]} />
                         </BarChart>
                       </ResponsiveContainer>
@@ -2384,6 +2420,7 @@ export default function Home() {
                         { key: "business_alignment", subject: "Business Alignment", score: selectedAssessment.business_alignment }
                       ].map((dim) => {
                         const { explanation, recommendation } = getReadinessDimensionExplanation(dim.subject, dim.score);
+                        const justification = getDimensionJustification(dim.key);
                         return (
                           <div key={dim.key} className="p-4 bg-slate-950/50 border border-slate-800 rounded-xl space-y-2">
                             <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -2432,6 +2469,11 @@ export default function Home() {
                                 </span>
                               )}
                             </div>
+                            {justification && (
+                              <p className="text-[11px] text-slate-300 leading-relaxed">
+                                <strong>Evidence:</strong> {justification}
+                              </p>
+                            )}
                             <p className="text-[11px] text-slate-400 leading-relaxed">
                               <strong>Status:</strong> {explanation}
                             </p>
@@ -2904,6 +2946,21 @@ export default function Home() {
                         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                         <div>
                           <p className="font-semibold">Please approve this assessment in Human Review Mode before generating client-ready assets.</p>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsReviewMode(true);
+                                setInsightsSubTab("summary");
+                              }}
+                              className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[11px] font-bold text-amber-100 transition-colors hover:bg-amber-500/20"
+                            >
+                              Open Review Controls
+                            </button>
+                            <span className="self-center text-[11px] text-amber-300/80">
+                              Set status to <strong>Approved</strong> and click <strong>Save Manual Edits</strong>.
+                            </span>
+                          </div>
                         </div>
                       </div>
                     </div>

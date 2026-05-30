@@ -88,12 +88,19 @@ class Assessment(Base):
 
     # Detailed Score cards (Data, Process, Integration, Governance, Security, Team, Business Alignment)
     data_readiness = Column(Float, default=0.0)
+    data_justification = Column(Text, nullable=True)
     process_readiness = Column(Float, default=0.0)
+    process_justification = Column(Text, nullable=True)
     integration_readiness = Column(Float, default=0.0)
+    integration_justification = Column(Text, nullable=True)
     governance_readiness = Column(Float, default=0.0)
+    governance_justification = Column(Text, nullable=True)
     security_readiness = Column(Float, default=0.0)
+    security_justification = Column(Text, nullable=True)
     team_readiness = Column(Float, default=0.0)
+    team_justification = Column(Text, nullable=True)
     business_alignment = Column(Float, default=0.0)
+    alignment_justification = Column(Text, nullable=True)
 
     # Interpretation paragraphs
     business_summary = Column(Text, nullable=True)

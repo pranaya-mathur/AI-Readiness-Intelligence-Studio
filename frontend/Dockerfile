@@ -1,4 +1,4 @@
-FROM node:18-alpine
+FROM node:20-bookworm-slim
 
 WORKDIR /app
 
@@ -10,5 +10,5 @@ COPY . .
 
 EXPOSE 3000
 
-# Runs in development mode to avoid alpine musl-arm64 native compilation errors of Tailwind oxide compiler
+# Runs in development mode and uses a glibc-based image so Tailwind oxide optional bindings load correctly.
 CMD ["npm", "run", "dev", "--", "--hostname", "0.0.0.0"]

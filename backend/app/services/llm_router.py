@@ -340,6 +340,71 @@ class LLMRouter:
         if require_json:
             if "use_case" in prompt.lower() or "opportunity" in prompt.lower():
                 return json.dumps({"use_cases": derived_use_cases})
+            elif (
+                "score each dimension from 0" in prompt.lower()
+                and "overall score = weighted average" in prompt.lower()
+            ):
+                ai_goals = _extract_list(prompt, "AI Goals")
+                data_score = 62.0
+                process_score = 58.0
+                integration_score = 54.0
+                governance_score = 57.0
+                security_score = 69.0
+                team_score = 51.0
+                alignment_score = 72.0
+
+                if any("data silo" in pain.lower() for pain in pain_points):
+                    data_score -= 10.0
+                if any("manual process" in pain.lower() for pain in pain_points):
+                    process_score -= 8.0
+                if "cloud-agnostic" in prompt.lower():
+                    integration_score += 8.0
+                if len(compliance) > 2:
+                    governance_score -= 6.0
+                    security_score += 4.0
+                if any("upskill" in goal.lower() for goal in ai_goals):
+                    team_score += 8.0
+
+                overall = (
+                    (data_score * 0.20)
+                    + (process_score * 0.15)
+                    + (integration_score * 0.15)
+                    + (governance_score * 0.15)
+                    + (security_score * 0.15)
+                    + (team_score * 0.10)
+                    + (alignment_score * 0.10)
+                )
+                automation = 34.0 + (
+                    8.0
+                    if any("efficiency" in goal.lower() for goal in ai_goals)
+                    else 0.0
+                )
+                top_use_case = (
+                    derived_use_cases[0]["use_case_name"]
+                    if derived_use_cases
+                    else "a focused workflow assistant"
+                )
+                return json.dumps(
+                    {
+                        "data_readiness": round(max(0.0, min(100.0, data_score)), 1),
+                        "data_justification": f"Data is spread across {', '.join(current_tools[:3]) or 'multiple internal systems'}, and pain points such as {', '.join(pain_points[:2]) or 'manual silos'} indicate uneven structure and accessibility.",
+                        "process_readiness": round(max(0.0, min(100.0, process_score)), 1),
+                        "process_justification": f"Manual bottlenecks around {', '.join(pain_points[:2]) or 'repetitive workflows'} suggest repeatable work exists, but standard operating flows are not yet consistently systematized.",
+                        "integration_readiness": round(max(0.0, min(100.0, integration_score)), 1),
+                        "integration_justification": f"The current tool stack ({', '.join(current_tools[:3]) or 'core business tools'}) provides a base for integration, but the operating model still relies on human handoffs rather than shared middleware or APIs.",
+                        "governance_readiness": round(max(0.0, min(100.0, governance_score)), 1),
+                        "governance_justification": f"Compliance obligations ({', '.join(compliance) or 'general governance requirements'}) are visible, but AI-specific review controls and auditable approval gates are not yet strongly evidenced.",
+                        "security_readiness": round(max(0.0, min(100.0, security_score)), 1),
+                        "security_justification": "Existing compliance and enterprise tooling provide a workable security baseline, though sensitive workflow protections still need to be enforced consistently for AI-assisted outputs.",
+                        "team_readiness": round(max(0.0, min(100.0, team_score)), 1),
+                        "team_justification": "Leadership has identified AI goals, but the prompt provides limited evidence of formal upskilling, change management, or internal AI operating ownership.",
+                        "business_alignment": round(max(0.0, min(100.0, alignment_score)), 1),
+                        "alignment_justification": f"The stated goals and derived use cases, especially {top_use_case}, map clearly to delivery speed, cost reduction, or client responsiveness outcomes.",
+                        "overall_score": round(overall, 1),
+                        "automation_potential": round(max(0.0, min(100.0, automation)), 1),
+                        "readiness_interpretation": f"{company or 'The client'} shows moderate AI readiness overall, with the clearest strength in business alignment and the biggest gap in team and integration maturity. The most defensible near-term move is a controlled pilot around {top_use_case}. Strengthen review workflows and adoption ownership before broader rollout.",
+                    }
+                )
             elif "bottleneck" in prompt.lower():
                 return json.dumps({"bottlenecks": derived_bottlenecks[:2]})
             elif "risk" in prompt.lower():
@@ -359,6 +424,63 @@ class LLMRouter:
                                 "is_control_met": 0,
                             },
                         ]
+                    }
+                )
+            elif (
+                "recommended pilot" in prompt.lower()
+                and "budget estimation" in prompt.lower()
+            ):
+                pilot = (
+                    derived_use_cases[0]
+                    if derived_use_cases
+                    else {
+                        "use_case_name": "AI Workflow Assistant",
+                        "department": departments[0],
+                        "value": "High",
+                        "complexity": "Medium",
+                        "risk": "Medium",
+                        "evidence": "It best balances near-term value and manageable delivery risk.",
+                        "confidence": 84.0,
+                    }
+                )
+                compliance_multiplier = max(0, len(compliance) - 1) * 5000
+                department_multiplier = max(0, len(departments) - 1) * 3000
+                if pilot.get("complexity") == "Low":
+                    budget_low, budget_high = 18000, 32000
+                    duration = 6
+                    roi = "ROI within 3-5 months post-deployment, driven by faster turnaround on repetitive knowledge work."
+                elif pilot.get("complexity") == "Medium":
+                    budget_low, budget_high = 40000, 70000
+                    duration = 10
+                    roi = "ROI within 5-7 months post-deployment, driven by reduced manual triage and improved throughput."
+                else:
+                    budget_low, budget_high = 85000, 140000
+                    duration = 14
+                    roi = "ROI within 8-12 months post-deployment, dependent on governance signoff and integration milestones."
+                budget_low += compliance_multiplier + department_multiplier
+                budget_high += compliance_multiplier + department_multiplier
+                return json.dumps(
+                    {
+                        "recommended_pilot": {
+                            "name": pilot.get("use_case_name"),
+                            "department": pilot.get("department", departments[0]),
+                            "why": f"{pilot.get('use_case_name')} best fits the current context because it directly addresses observed bottlenecks and offers the strongest value-to-complexity ratio for a first deployment. The supporting evidence is {pilot.get('evidence', 'grounded in the documented workflow pain points')}.",
+                            "expected_impact": "Reduce manual turnaround time by 25-40% in the first pilot scope while improving response consistency and evidence reuse.",
+                            "confidence": float(pilot.get("confidence", 84.0)),
+                            "complexity": pilot.get("complexity", "Medium"),
+                            "estimated_duration_weeks": duration,
+                        },
+                        "proposal_summary": {
+                            "title": f"AI Enablement Strategy Proposal: {company or 'Client'}",
+                            "executive_summary": f"{company or 'The client'} has a credible AI opportunity centered on repetitive knowledge workflows. The recommended first pilot is {pilot.get('use_case_name')}, which should deliver measurable turnaround improvements without the risk of a broad platform replacement. If scoped and launched within 90 days, the pilot can create defensible proof of value for a wider AI operating model.",
+                            "est_budget": f"${budget_low:,.0f} - ${budget_high:,.0f}",
+                            "roi_projection": roi,
+                            "key_risks_acknowledged": [
+                                "Governance controls may lag behind pilot velocity if approval checkpoints are not formalized.",
+                                "Source quality and integration handoffs may reduce early trust in outputs without curated inputs.",
+                            ],
+                            "next_step": "Confirm pilot success metrics, source documents, and review owners before implementation kickoff.",
+                        },
                     }
                 )
             elif "roadmap" in prompt.lower():

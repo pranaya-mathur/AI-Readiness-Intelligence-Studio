@@ -33,12 +33,19 @@ class AssessmentState(BaseModel):
 
     # Scores
     data_readiness: float = 0.0
+    data_justification: str | None = None
     process_readiness: float = 0.0
+    process_justification: str | None = None
     integration_readiness: float = 0.0
+    integration_justification: str | None = None
     governance_readiness: float = 0.0
+    governance_justification: str | None = None
     security_readiness: float = 0.0
+    security_justification: str | None = None
     team_readiness: float = 0.0
+    team_justification: str | None = None
     business_alignment: float = 0.0
+    alignment_justification: str | None = None
     overall_score: float = 0.0
     automation_potential: float = 0.0
     readiness_interpretation: str = ""

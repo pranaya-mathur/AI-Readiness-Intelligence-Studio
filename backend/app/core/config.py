@@ -16,6 +16,10 @@ def _parse_cors_origins() -> List[str]:
     ]
 
 
+def _default_cors_origins_raw() -> str:
+    return ",".join(_parse_cors_origins())
+
+
 class Settings(BaseSettings):
     # App General Config
     PROJECT_NAME: str = "AI Readiness Intelligence Studio"
@@ -23,7 +27,7 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
     SECRET_KEY: str = os.getenv("SECRET_KEY", "super-secret-key-change-in-production")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
-    CORS_ORIGINS: List[str] = _parse_cors_origins()
+    CORS_ORIGINS_RAW: str = os.getenv("CORS_ORIGINS", _default_cors_origins_raw())
     REQUIRE_POSTGRES: bool = os.getenv("REQUIRE_POSTGRES", "false").lower() == "true"
 
     # Database CONFIG (Dual Mode Fallback)
@@ -53,10 +57,10 @@ class Settings(BaseSettings):
 
     # Ollama Catalog mappings
     OLLAMA_REASONING_MODEL: str = os.getenv(
-        "OLLAMA_REASONING_MODEL", "qwen3.5:9b"
+        "OLLAMA_REASONING_MODEL", "qwen2.5:7b"
     )  # fallback: llama3:8b
     OLLAMA_STRUCTURED_MODEL: str = os.getenv(
-        "OLLAMA_STRUCTURED_MODEL", "qwen2.5-coder:14b"
+        "OLLAMA_STRUCTURED_MODEL", "llama3:8b"
     )
     OLLAMA_LIGHTWEIGHT_MODEL: str = os.getenv(
         "OLLAMA_LIGHTWEIGHT_MODEL", "phi3.5:latest"
@@ -66,6 +70,13 @@ class Settings(BaseSettings):
     OLLAMA_EMBEDDING_MODEL: str = os.getenv(
         "OLLAMA_EMBEDDING_MODEL", "nomic-embed-text:latest"
     )  # fallback: qwen3-embedding:8b
+
+    @property
+    def cors_origins(self) -> List[str]:
+        raw_value = self.CORS_ORIGINS_RAW.strip()
+        if not raw_value:
+            return []
+        return [origin.strip() for origin in raw_value.split(",") if origin.strip()]
 
     class Config:
         case_sensitive = True
