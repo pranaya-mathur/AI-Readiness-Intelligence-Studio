@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict
+from typing import Any
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
@@ -55,8 +55,8 @@ class AssessmentOrchestrator:
         logger.info("LangGraph Assessment Orchestrator compiled successfully.")
 
     def run_assessment(
-        self, initial_state: Dict[str, Any], thread_id: str = "default_thread"
-    ) -> Dict[str, Any]:
+        self, initial_state: dict[str, Any], thread_id: str = "default_thread"
+    ) -> dict[str, Any]:
         """
         Executes the LangGraph analysis pipeline on the given initial state under a thread.
         """

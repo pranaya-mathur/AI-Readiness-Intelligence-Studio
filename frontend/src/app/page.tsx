@@ -117,6 +117,21 @@ interface Assessment {
   reviewer_notes: string | null;
   approval_status: string | null;
   readiness_interpretation: string | null;
+  scoring_method?: string | null;
+  scoring_rubric_version?: string | null;
+  dimension_score_details?: Record<string, {
+    justification?: string;
+    evidence_refs?: string[];
+    missing_information?: string[];
+    estimate_flags?: string[];
+    reviewer_status?: string;
+    score?: number;
+  }> | null;
+  analysis_mode?: string | null;
+  model_provider?: string | null;
+  model_run_status?: string | null;
+  insufficient_evidence?: number | null;
+  automation_potential_basis?: string | null;
   created_at: string;
   updated_at: string;
   bottlenecks: Bottleneck[];
@@ -183,106 +198,48 @@ export default function Home() {
   const riskLevelVal = selectedAssessment?.risk_level ?? "Low";
   const currentApprovalStatusVal = selectedAssessment?.approval_status ?? "draft";
 
-  const getReadinessDimensionExplanation = (subject: string, score: number) => {
-    const currentTools = selectedAssessment?.current_tools || [];
-    const painPoints = selectedAssessment?.pain_points || [];
-    const compliance = selectedAssessment?.compliance_requirements || [];
-    
-    const toolsStr = currentTools.length > 0 ? currentTools.join(", ") : "internal legacy tools";
-    const painStr = painPoints.length > 0 ? painPoints.slice(0, 2).join(" and ").toLowerCase() : "manual coordination friction";
-    const compStr = compliance.length > 0 ? compliance.join(", ") : "general industry baselines";
+  const DIMENSION_WEIGHTS: Record<string, number> = {
+    data_readiness: 0.20,
+    process_readiness: 0.15,
+    integration_readiness: 0.15,
+    governance_readiness: 0.15,
+    security_readiness: 0.15,
+    team_readiness: 0.10,
+    business_alignment: 0.10,
+  };
 
-    switch(subject) {
-      case "Data Readiness":
-        if (score >= 70) {
-          return {
-            explanation: `Structured data sources are reasonably well-defined in existing tools like ${toolsStr}, creating a viable foundation for ingestion.`,
-            recommendation: "Establish automated data pipelines and data ingestion scrubbers to maintain high-quality vectors for LLM context windows."
-          };
-        } else {
-          return {
-            explanation: `Data exists across business systems, but fragmentation across ${toolsStr} limits immediate AI scaling due to manual silos and inconsistent formatting.`,
-            recommendation: "Centralize corporate knowledge databases into structured cloud directories and consolidate scattered team spreadsheets."
-          };
-        }
-      case "Process Readiness":
-        if (score >= 70) {
-          return {
-            explanation: "Core business workflows are structured, with clean handoff points and standardized steps suitable for immediate agent routing.",
-            recommendation: "Deploy shadow AI models to test auto-classification in live operations before replacing manual routing entirely."
-          };
-        } else {
-          return {
-            explanation: `Several workflows in scoping scope are highly repetitive and prone to ${painStr}, but lack formal process standardization before scaling.`,
-            recommendation: "Document step-by-step operating guidelines for proposal drafting and ticket routing to prepare structured templates for AI mapping."
-          };
-        }
-      case "Integration Readiness":
-        if (score >= 70) {
-          return {
-            explanation: `Existing stack (${toolsStr}) supports standard REST/GraphQL APIs, allowing AI agents to query and write data seamlessly.`,
-            recommendation: "Register customized webhook triggers and develop lightweight middleware integrations to track automated actions."
-          };
-        } else {
-          return {
-            explanation: `Existing tools provide base integration potential, but lack cohesive middleware pipelines, resulting in manual copy-paste routines.`,
-            recommendation: "Build dedicated middleware endpoints or leverage unified connector APIs to integrate AI workflows into CRM and ticketing databases."
-          };
-        }
-      case "Governance Readiness":
-        if (score >= 70) {
-          return {
-            explanation: `Rigid control logs and tracking structures are configured, ensuring all automated client operations remain audible.`,
-            recommendation: "Configure automated prompt-engineering validation rules and deploy semantic filters to continuously check LLM outputs."
-          };
-        } else {
-          return {
-            explanation: `Compliance requirements (${compStr}) are known, but AI-specific controls like audit trails, approval gates, and output validation must be strengthened.`,
-            recommendation: "Mandate Human Review workflows for all generated proposal drafts and support responses before external delivery."
-          };
-        }
-      case "Security Readiness":
-        if (score >= 70) {
-          return {
-            explanation: `Strong security postures are active, including SOC2/GDPR compliance frameworks that cover basic data access rights.`,
-            recommendation: "Implement private tenant workspace isolations and set up enterprise single-sign-on (SSO) credentials."
-          };
-        } else {
-          return {
-            explanation: `Security baseline is operational, but sensitive document handling, regex-based PII scrubbing, and role-based access controls require enforcement before scale.`,
-            recommendation: "Integrate automatic pre-processing sanitizers to scrub proprietary figures and customer identifiers before dispatching to external APIs."
-          };
-        }
-      case "Team Readiness":
-        if (score >= 70) {
-          return {
-            explanation: "Consultants and transformation executives display strong agility and are highly prepared to adopt conversational AI copilots.",
-            recommendation: "Appoint internal 'AI champions' to host weekly feedback sessions and prioritize next-phase feature requirements."
-          };
-        } else {
-          return {
-            explanation: `Teams can highly benefit from AI proposal and support copilots, but formal usage guidelines and onboarding cycles are required for sustainable adoption.`,
-            recommendation: "Conduct structured training workshops and define clear guidelines highlighting standard operating protocols for AI outputs."
-          };
-        }
-      case "Business Alignment":
-        if (score >= 70) {
-          return {
-            explanation: `AI opportunities align tightly with high-priority business objectives such as shortening sales cycles and improving margins.`,
-            recommendation: "Track clear key performance indicators (KPIs) like average draft generation time to demonstrate strategic ROI."
-          };
-        } else {
-          return {
-            explanation: `AI goals are aligned with general priorities (e.g. efficiency or cost reduction), but require concrete mapping to operational bottlenecks.`,
-            recommendation: "Establish immediate pilot projects (like proposal copilot MVP) to quickly prove value and secure leadership buy-in."
-          };
-        }
-      default:
-        return {
-          explanation: "Assessment dimension calculated based on intake signals and industry averages.",
-          recommendation: "Continue tracking baseline metrics across discovery sessions."
-        };
+  const recomputeWeightedOverall = (assessment: Assessment) => {
+    let total = 0;
+    for (const [key, weight] of Object.entries(DIMENSION_WEIGHTS)) {
+      total += int(assessment[key as keyof Assessment] as number) * weight;
     }
+    return Math.round(total * 10) / 10;
+  };
+
+  const getReadinessDimensionExplanation = (subject: string, score: number, key?: string) => {
+    const details = key ? selectedAssessment?.dimension_score_details?.[key] : undefined;
+    const backendJustification = key ? getDimensionJustification(key) : null;
+    const missing = details?.missing_information || [];
+    const flags = details?.estimate_flags || [];
+    const refs = details?.evidence_refs || [];
+    const insufficient = Boolean(selectedAssessment?.insufficient_evidence);
+    const uncertainty = insufficient
+      ? "Uncertainty: insufficient document evidence — treat this score as provisional."
+      : flags.length
+        ? `Uncertainty: ${flags.join(", ").replaceAll("_", " ")}.`
+        : refs.length
+          ? `Grounded in ${refs.length} cited evidence item(s); still subject to human review.`
+          : "Uncertainty: limited cited evidence for this dimension.";
+
+    const explanation = backendJustification
+      ? `${backendJustification} ${uncertainty}`
+      : `Score ${int(score)}/100 for ${subject} is derived from intake signals and document-observed cues. ${uncertainty}`;
+
+    const recommendation = missing.length
+      ? `Missing evidence to close: ${missing.slice(0, 2).join(" ")}`
+      : "Validate this dimension with a human reviewer before external client delivery.";
+
+    return { explanation, recommendation, missing, refs, uncertainty };
   };
 
   // --- PROCESSING STEPS ---
@@ -1800,7 +1757,7 @@ export default function Home() {
                         <tr key={idx} className="text-slate-300">
                           <td className="py-2.5 truncate max-w-[120px] font-semibold">{sig.source_file}</td>
                           <td className="py-2.5">{sig.signal_type}</td>
-                          <td className="py-2.5 text-blue-400 font-bold">{sig.confidence}%</td>
+                          <td className="py-2.5 text-blue-400 font-bold">{(sig as { evidence_tier?: string }).evidence_tier || "uncalibrated"}</td>
                           <td className="py-2.5 text-slate-400">{sig.description}</td>
                         </tr>
                       ))}
@@ -1902,11 +1859,11 @@ export default function Home() {
                   {selectedAssessment.client_summary || selectedAssessment.business_summary || "No business summary computed yet."}
                 </p>
                 <div className="flex items-center gap-4 mt-3 pt-3 border-t border-slate-800 text-[10px] text-slate-400">
-                  <span>Confidence: <strong className="text-blue-400">{selectedAssessment.confidence_score}%</strong></span>
+                  <span>Confidence: <strong className="text-amber-300">Uncalibrated estimate</strong></span>
                   <span>•</span>
-                  <span>Impact Index: <strong className="text-indigo-400">High</strong></span>
+                  <span>Analysis: <strong className="text-indigo-400">{selectedAssessment.analysis_mode || "real"} / {selectedAssessment.model_run_status || "n/a"}</strong></span>
                   <span>•</span>
-                  <span>Readiness Rank: <strong className="text-emerald-400">{int(selectedAssessment.overall_score)}/100</strong></span>
+                  <span>Readiness Rank: <strong className="text-emerald-400">{int(selectedAssessment.overall_score)}/100</strong> <span className="text-slate-500">(deterministic weighted)</span></span>
                 </div>
               </div>
 
@@ -2194,7 +2151,7 @@ export default function Home() {
                           <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase ${u.priority === "P1" ? "bg-red-950 text-red-400 border border-red-500/20" : "bg-amber-950 text-amber-400 border border-amber-500/20"}`}>
                             {u.priority}
                           </span>
-                          <span className="text-[10px] text-blue-400 font-bold">{u.confidence}% Confidence</span>
+                          <span className="text-[10px] text-amber-300 font-bold">Uncalibrated estimate</span>
                         </div>
 
                         <div className="flex items-center gap-2">
@@ -2412,6 +2369,12 @@ export default function Home() {
                   <p className="text-xs text-slate-300 leading-relaxed pt-4 border-t border-slate-800">
                     <strong>Interpretation:</strong> {selectedAssessment.readiness_interpretation}
                   </p>
+                  <p className="text-[10px] text-slate-500">
+                    Scoring method: {selectedAssessment.scoring_method || "deterministic_rubric_v1"}
+                    {selectedAssessment.scoring_rubric_version ? ` (${selectedAssessment.scoring_rubric_version})` : ""}.
+                    {selectedAssessment.insufficient_evidence ? " Insufficient document evidence — scores are provisional." : " Dimension narrative uses evidence-derived justifications with explicit uncertainty."}
+                    {selectedAssessment.automation_potential_basis ? ` Automation potential basis: ${selectedAssessment.automation_potential_basis}.` : ""}
+                  </p>
 
                   {/* Detailed Dimension Explanations Stack */}
                   <div className="pt-6 border-t border-slate-800 space-y-4">
@@ -2426,7 +2389,7 @@ export default function Home() {
                         { key: "team_readiness", subject: "Team Readiness", score: selectedAssessment.team_readiness },
                         { key: "business_alignment", subject: "Business Alignment", score: selectedAssessment.business_alignment }
                       ].map((dim) => {
-                        const { explanation, recommendation } = getReadinessDimensionExplanation(dim.subject, dim.score);
+                        const { explanation, recommendation, missing, uncertainty } = getReadinessDimensionExplanation(dim.subject, dim.score, dim.key);
                         const justification = getDimensionJustification(dim.key);
                         return (
                           <div key={dim.key} className="p-4 bg-slate-950/50 border border-slate-800 rounded-xl space-y-2">
@@ -2444,9 +2407,7 @@ export default function Home() {
                                       const updatedScore = isNaN(val) ? 0 : val;
                                       const newAssessment = { ...selectedAssessment, [dim.key]: updatedScore };
                                       // recalculate overall average score dynamically
-                                      const keys = ["data_readiness", "process_readiness", "integration_readiness", "governance_readiness", "security_readiness", "team_readiness", "business_alignment"];
-                                      const avg = Math.round(keys.reduce((acc, k) => acc + int(newAssessment[k as keyof Assessment] as number), 0) / keys.length);
-                                      newAssessment.overall_score = avg;
+                                      newAssessment.overall_score = recomputeWeightedOverall(newAssessment);
                                       setSelectedAssessment(newAssessment);
                                     }}
                                     className="w-16 md:w-24 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
@@ -2462,9 +2423,7 @@ export default function Home() {
                                       if (val > 100) val = 100;
                                       if (val < 0) val = 0;
                                       const newAssessment = { ...selectedAssessment, [dim.key]: val };
-                                      const keys = ["data_readiness", "process_readiness", "integration_readiness", "governance_readiness", "security_readiness", "team_readiness", "business_alignment"];
-                                      const avg = Math.round(keys.reduce((acc, k) => acc + int(newAssessment[k as keyof Assessment] as number), 0) / keys.length);
-                                      newAssessment.overall_score = avg;
+                                      newAssessment.overall_score = recomputeWeightedOverall(newAssessment);
                                       setSelectedAssessment(newAssessment);
                                     }}
                                     className="w-10 bg-slate-900 border border-slate-700 rounded text-center text-[10px] font-extrabold text-blue-400 focus:outline-none"
@@ -2484,6 +2443,14 @@ export default function Home() {
                             <p className="text-[11px] text-slate-400 leading-relaxed">
                               <strong>Status:</strong> {explanation}
                             </p>
+                            <p className="text-[11px] text-amber-200/80 leading-relaxed">
+                              <strong>Uncertainty:</strong> {uncertainty}
+                            </p>
+                            {missing.length > 0 && (
+                              <p className="text-[11px] text-rose-300/80 leading-relaxed">
+                                <strong>Missing evidence:</strong> {missing.join(" ")}
+                              </p>
+                            )}
                             <p className="text-[11px] text-blue-400 bg-blue-950/20 border border-blue-500/10 p-2 rounded leading-relaxed">
                               <strong>Recommendation:</strong> {recommendation}
                             </p>

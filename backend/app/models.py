@@ -1,6 +1,8 @@
 import datetime
-from sqlalchemy import Column, Integer, String, Text, Float, DateTime, ForeignKey, JSON
+
+from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
+
 from app.core.database import Base
 
 
@@ -158,6 +160,7 @@ class ProcessBottleneck(Base):
     process_name = Column(String, nullable=False)
     bottleneck_description = Column(Text, nullable=False)
     ai_potential = Column(String, default="Medium")  # High, Medium, Low
+    evidence_refs = Column(JSON, nullable=True)  # list[str] evidence_ids
 
     assessment = relationship("Assessment", back_populates="bottlenecks")
 
@@ -180,6 +183,7 @@ class AIUseCase(Base):
         Text, nullable=True
     )  # Recommended because uploaded documents show...
     confidence = Column(Float, default=85.0)  # Confidence level in recommendation
+    evidence_refs = Column(JSON, nullable=True)  # list[str] evidence_ids
 
     assessment = relationship("Assessment", back_populates="use_cases")
 
@@ -195,6 +199,7 @@ class RiskRegister(Base):
     severity = Column(String, default="Medium")  # High, Medium, Low
     recommendation = Column(Text, nullable=False)
     is_control_met = Column(Integer, default=0)  # 0 = No, 1 = Yes
+    evidence_refs = Column(JSON, nullable=True)  # list[str] evidence_ids
 
     assessment = relationship("Assessment", back_populates="risks")
 

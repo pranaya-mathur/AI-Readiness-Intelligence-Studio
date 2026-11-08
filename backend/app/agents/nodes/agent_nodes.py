@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from app.agents.state import AssessmentState
 from app.core.config import settings
@@ -53,7 +53,7 @@ def _evidence_block(state: AssessmentState) -> str:
     )
 
 
-def _sync_model_meta(state: AssessmentState) -> Dict[str, Any]:
+def _sync_model_meta(state: AssessmentState) -> dict[str, Any]:
     summary = LLMRouter.session_summary()
     return {
         "analysis_mode": summary.get("execution_mode") or _analysis_mode(),
@@ -65,7 +65,7 @@ def _sync_model_meta(state: AssessmentState) -> Dict[str, Any]:
     }
 
 
-def _parse_json_object(raw: str) -> Optional[Dict[str, Any]]:
+def _parse_json_object(raw: str) -> dict[str, Any] | None:
     try:
         data = json.loads(raw)
         if isinstance(data, dict):
@@ -83,7 +83,7 @@ def _parse_json_object(raw: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _incomplete(state: AssessmentState, reason: str) -> Dict[str, Any]:
+def _incomplete(state: AssessmentState, reason: str) -> dict[str, Any]:
     meta = _sync_model_meta(state)
     return {
         **meta,
@@ -94,7 +94,7 @@ def _incomplete(state: AssessmentState, reason: str) -> Dict[str, Any]:
 
 
 # 1. Document Understanding Agent
-def document_understanding_node(state: AssessmentState) -> Dict[str, Any]:
+def document_understanding_node(state: AssessmentState) -> dict[str, Any]:
     logger.info("Running Node: Document Understanding...")
     documents = state.documents or []
     if not documents and state.extracted_text:
@@ -119,7 +119,7 @@ def document_understanding_node(state: AssessmentState) -> Dict[str, Any]:
     evidence_prompt = package.prompt_block()
 
     # Optional LLM enrichment — must cite evidence ids; never fabricate excerpts.
-    enrichment: List[Dict[str, Any]] = []
+    enrichment: list[dict[str, Any]] = []
     try:
         prompt = f"""
 You are the Document Understanding Agent for an evidence-driven readiness assessment.
@@ -209,15 +209,17 @@ Return JSON:
         "extracted_text": state.extracted_text,
         "logs": state.logs
         + [
-            f"Document Understanding extracted {len(combined)} evidence-backed signals "
-            f"(insufficient={package.insufficient_evidence})."
+            (
+                f"Document Understanding extracted {len(combined)} evidence-backed signals "
+                f"(insufficient={package.insufficient_evidence})."
+            )
         ],
         "current_node": "document_understanding",
     }
 
 
 # 2. Business Context Agent
-def business_context_node(state: AssessmentState) -> Dict[str, Any]:
+def business_context_node(state: AssessmentState) -> dict[str, Any]:
     logger.info("Running Node: Business Context...")
     if state.analysis_incomplete:
         return {"current_node": "business_context"}
@@ -260,7 +262,7 @@ AI Goals: {", ".join(state.ai_goals)}
 
 
 # 3. Process Bottleneck Agent
-def process_bottleneck_node(state: AssessmentState) -> Dict[str, Any]:
+def process_bottleneck_node(state: AssessmentState) -> dict[str, Any]:
     logger.info("Running Node: Process Bottleneck...")
     if state.analysis_incomplete:
         return {"current_node": "process_bottleneck"}
@@ -338,7 +340,7 @@ JSON:
 
 
 # 4. AI Use Case Discovery Agent
-def ai_use_case_node(state: AssessmentState) -> Dict[str, Any]:
+def ai_use_case_node(state: AssessmentState) -> dict[str, Any]:
     logger.info("Running Node: AI Use Case Discovery...")
     if state.analysis_incomplete:
         return {"current_node": "ai_use_case"}
@@ -440,7 +442,7 @@ JSON:
 
 
 # 5. Readiness Scoring Agent (deterministic overall)
-def readiness_scoring_node(state: AssessmentState) -> Dict[str, Any]:
+def readiness_scoring_node(state: AssessmentState) -> dict[str, Any]:
     logger.info("Running Node: Readiness Scoring...")
     if state.analysis_incomplete:
         return {"current_node": "readiness_scoring"}
@@ -491,15 +493,17 @@ Return plain text only.
         **flat,
         "logs": state.logs
         + [
-            f"Readiness Scoring used {scorecard.scoring_method} "
-            f"({scorecard.rubric_version}). Overall={scorecard.overall_score}/100."
+            (
+                f"Readiness Scoring used {scorecard.scoring_method} "
+                f"({scorecard.rubric_version}). Overall={scorecard.overall_score}/100."
+            )
         ],
         "current_node": "readiness_scoring",
     }
 
 
 # 6. Risk & Governance Agent
-def risk_governance_node(state: AssessmentState) -> Dict[str, Any]:
+def risk_governance_node(state: AssessmentState) -> dict[str, Any]:
     logger.info("Running Node: Risk & Governance...")
     if state.analysis_incomplete:
         return {"current_node": "risk_governance"}
@@ -571,7 +575,7 @@ JSON:
 
 
 # 7. Roadmap Planning Agent
-def roadmap_planning_node(state: AssessmentState) -> Dict[str, Any]:
+def roadmap_planning_node(state: AssessmentState) -> dict[str, Any]:
     logger.info("Running Node: Roadmap Planning...")
     if state.analysis_incomplete:
         return {"current_node": "roadmap_planning"}
@@ -651,7 +655,7 @@ JSON:
 
 
 # 8. Proposal Writing Agent
-def proposal_writing_node(state: AssessmentState) -> Dict[str, Any]:
+def proposal_writing_node(state: AssessmentState) -> dict[str, Any]:
     logger.info("Running Node: Proposal Writing...")
     if state.analysis_incomplete:
         return {"current_node": "proposal_writing"}
@@ -777,7 +781,7 @@ JSON:
 
 
 # 9. Report Generation Agent
-def report_generation_node(state: AssessmentState) -> Dict[str, Any]:
+def report_generation_node(state: AssessmentState) -> dict[str, Any]:
     logger.info("Running Node: Report Generation...")
     meta = _sync_model_meta(state)
     status_note = (

@@ -1,5 +1,4 @@
 import logging
-from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -43,7 +42,7 @@ def get_client_for_user(
     )
 
 
-@router.get("/", response_model=List[ClientResponse])
+@router.get("/", response_model=list[ClientResponse])
 def list_clients(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -108,4 +107,3 @@ def delete_client(
 
     db.delete(client)
     db.commit()
-    return None

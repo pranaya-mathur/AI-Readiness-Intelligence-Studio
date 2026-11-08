@@ -1,8 +1,7 @@
 import re
-from typing import Optional
 
 
-def sanitize_text(text: Optional[str], fallback: str = "") -> str:
+def sanitize_text(text: str | None, fallback: str = "") -> str:
     """
     Cleans up prompt leakage, raw JSON formats, schemas, instructions,
     and returns a clean client-facing sentence. If the text becomes empty

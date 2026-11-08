@@ -1,6 +1,6 @@
-from typing import List, Optional
-from pydantic import BaseModel, EmailStr
 from datetime import datetime
+
+from pydantic import BaseModel, EmailStr
 
 
 # --- Auth Schemas ---
@@ -27,7 +27,7 @@ class Token(BaseModel):
 
 
 class TokenData(BaseModel):
-    email: Optional[str] = None
+    email: str | None = None
 
 
 # --- Assessment Support Schemas ---
@@ -36,6 +36,7 @@ class BottleneckBase(BaseModel):
     process_name: str
     bottleneck_description: str
     ai_potential: str
+    evidence_refs: list[str] | None = None
 
 
 class BottleneckCreate(BottleneckBase):
@@ -58,8 +59,9 @@ class UseCaseBase(BaseModel):
     complexity: str
     risk: str
     priority: str
-    evidence: Optional[str] = None
+    evidence: str | None = None
     confidence: float = 85.0
+    evidence_refs: list[str] | None = None
 
 
 class UseCaseCreate(UseCaseBase):
@@ -79,6 +81,7 @@ class RiskBase(BaseModel):
     severity: str
     recommendation: str
     is_control_met: int = 0
+    evidence_refs: list[str] | None = None
 
 
 class RiskCreate(RiskBase):
@@ -117,11 +120,11 @@ class SignalBase(BaseModel):
     signal_type: str
     description: str
     confidence: float = 0.0
-    document_id: Optional[str] = None
-    excerpt: Optional[str] = None
-    page_or_section: Optional[str] = None
-    evidence_tier: Optional[str] = None
-    evidence_id: Optional[str] = None
+    document_id: str | None = None
+    excerpt: str | None = None
+    page_or_section: str | None = None
+    evidence_tier: str | None = None
+    evidence_id: str | None = None
 
 
 class SignalResponse(SignalBase):
@@ -134,10 +137,10 @@ class SignalResponse(SignalBase):
 
 class ClientBase(BaseModel):
     name: str
-    industry: Optional[str] = None
-    company_size: Optional[str] = None
-    cloud_preference: Optional[str] = None
-    compliance_requirements: List[str] = []
+    industry: str | None = None
+    company_size: str | None = None
+    cloud_preference: str | None = None
+    compliance_requirements: list[str] = []
 
 
 class ClientCreate(ClientBase):
@@ -155,129 +158,129 @@ class ClientResponse(ClientBase):
 
 # --- Main Assessment Schemas ---
 class AssessmentCreate(BaseModel):
-    client_id: Optional[int] = None
+    client_id: int | None = None
     company_name: str
-    industry: Optional[str] = "Professional Services"
-    company_size: Optional[str] = "100-500 employees"
-    departments: List[str] = []
-    current_tools: List[str] = []
-    cloud_preference: Optional[str] = "Cloud-agnostic"
-    compliance_requirements: List[str] = []
-    main_business_goals: Optional[str] = ""
-    pain_points: List[str] = []
-    ai_goals: List[str] = []
+    industry: str | None = "Professional Services"
+    company_size: str | None = "100-500 employees"
+    departments: list[str] = []
+    current_tools: list[str] = []
+    cloud_preference: str | None = "Cloud-agnostic"
+    compliance_requirements: list[str] = []
+    main_business_goals: str | None = ""
+    pain_points: list[str] = []
+    ai_goals: list[str] = []
 
 
 class AssessmentUpdate(BaseModel):
     # Allows Human Review Mode overrides
-    client_id: Optional[int] = None
-    company_name: Optional[str] = None
-    industry: Optional[str] = None
-    company_size: Optional[str] = None
-    overall_score: Optional[float] = None
-    automation_potential: Optional[float] = None
-    confidence_score: Optional[float] = None
-    risk_level: Optional[str] = None
-    status: Optional[str] = None
+    client_id: int | None = None
+    company_name: str | None = None
+    industry: str | None = None
+    company_size: str | None = None
+    overall_score: float | None = None
+    automation_potential: float | None = None
+    confidence_score: float | None = None
+    risk_level: str | None = None
+    status: str | None = None
 
     # Custom score overrides
-    data_readiness: Optional[float] = None
-    data_justification: Optional[str] = None
-    process_readiness: Optional[float] = None
-    process_justification: Optional[str] = None
-    integration_readiness: Optional[float] = None
-    integration_justification: Optional[str] = None
-    governance_readiness: Optional[float] = None
-    governance_justification: Optional[str] = None
-    security_readiness: Optional[float] = None
-    security_justification: Optional[str] = None
-    team_readiness: Optional[float] = None
-    team_justification: Optional[str] = None
-    business_alignment: Optional[float] = None
-    alignment_justification: Optional[str] = None
+    data_readiness: float | None = None
+    data_justification: str | None = None
+    process_readiness: float | None = None
+    process_justification: str | None = None
+    integration_readiness: float | None = None
+    integration_justification: str | None = None
+    governance_readiness: float | None = None
+    governance_justification: str | None = None
+    security_readiness: float | None = None
+    security_justification: str | None = None
+    team_readiness: float | None = None
+    team_justification: str | None = None
+    business_alignment: float | None = None
+    alignment_justification: str | None = None
 
     # Interpretation text overrides
-    business_summary: Optional[str] = None
-    readiness_interpretation: Optional[str] = None
-    client_summary: Optional[str] = None
-    reviewer_notes: Optional[str] = None
-    approval_status: Optional[str] = None
-    recommended_first_pilot: Optional[str] = None
-    why_recommended_pilot: Optional[str] = None
-    expected_pilot_impact: Optional[str] = None
+    business_summary: str | None = None
+    readiness_interpretation: str | None = None
+    client_summary: str | None = None
+    reviewer_notes: str | None = None
+    approval_status: str | None = None
+    recommended_first_pilot: str | None = None
+    why_recommended_pilot: str | None = None
+    expected_pilot_impact: str | None = None
 
     # Overriding sub-relations
-    use_cases: Optional[List[UseCaseBase]] = None
-    bottlenecks: Optional[List[BottleneckBase]] = None
-    risks: Optional[List[RiskBase]] = None
-    roadmap_items: Optional[List[RoadmapBase]] = None
+    use_cases: list[UseCaseBase] | None = None
+    bottlenecks: list[BottleneckBase] | None = None
+    risks: list[RiskBase] | None = None
+    roadmap_items: list[RoadmapBase] | None = None
 
 
 class AssessmentResponse(BaseModel):
     id: int
-    client_id: Optional[int]
+    client_id: int | None
     company_name: str
-    industry: Optional[str]
-    company_size: Optional[str]
-    departments: Optional[List[str]]
-    current_tools: Optional[List[str]]
-    cloud_preference: Optional[str]
-    compliance_requirements: Optional[List[str]]
-    main_business_goals: Optional[str]
-    pain_points: Optional[List[str]]
-    ai_goals: Optional[List[str]]
+    industry: str | None
+    company_size: str | None
+    departments: list[str] | None
+    current_tools: list[str] | None
+    cloud_preference: str | None
+    compliance_requirements: list[str] | None
+    main_business_goals: str | None
+    pain_points: list[str] | None
+    ai_goals: list[str] | None
 
     overall_score: float
     automation_potential: float
     confidence_score: float
     status: str
     risk_level: str
-    recommended_first_pilot: Optional[str]
-    why_recommended_pilot: Optional[str]
-    expected_pilot_impact: Optional[str]
+    recommended_first_pilot: str | None
+    why_recommended_pilot: str | None
+    expected_pilot_impact: str | None
 
     data_readiness: float
-    data_justification: Optional[str]
+    data_justification: str | None
     process_readiness: float
-    process_justification: Optional[str]
+    process_justification: str | None
     integration_readiness: float
-    integration_justification: Optional[str]
+    integration_justification: str | None
     governance_readiness: float
-    governance_justification: Optional[str]
+    governance_justification: str | None
     security_readiness: float
-    security_justification: Optional[str]
+    security_justification: str | None
     team_readiness: float
-    team_justification: Optional[str]
+    team_justification: str | None
     business_alignment: float
-    alignment_justification: Optional[str]
+    alignment_justification: str | None
 
-    business_summary: Optional[str]
-    readiness_interpretation: Optional[str]
-    client_summary: Optional[str]
-    reviewer_notes: Optional[str]
-    approval_status: Optional[str]
+    business_summary: str | None
+    readiness_interpretation: str | None
+    client_summary: str | None
+    reviewer_notes: str | None
+    approval_status: str | None
 
-    scoring_rubric_version: Optional[str] = None
-    scoring_method: Optional[str] = None
-    dimension_score_details: Optional[dict] = None
-    automation_potential_basis: Optional[str] = None
-    analysis_mode: Optional[str] = None
-    model_provider: Optional[str] = None
-    model_name: Optional[str] = None
-    model_run_status: Optional[str] = None
-    model_error: Optional[str] = None
-    evidence_package: Optional[dict] = None
-    insufficient_evidence: Optional[int] = 0
+    scoring_rubric_version: str | None = None
+    scoring_method: str | None = None
+    dimension_score_details: dict | None = None
+    automation_potential_basis: str | None = None
+    analysis_mode: str | None = None
+    model_provider: str | None = None
+    model_name: str | None = None
+    model_run_status: str | None = None
+    model_error: str | None = None
+    evidence_package: dict | None = None
+    insufficient_evidence: int | None = 0
 
     created_at: datetime
     updated_at: datetime
 
-    bottlenecks: List[BottleneckResponse] = []
-    use_cases: List[UseCaseResponse] = []
-    risks: List[RiskResponse] = []
-    roadmap_items: List[RoadmapResponse] = []
-    extracted_signals: List[SignalResponse] = []
-    client: Optional[ClientResponse] = None
+    bottlenecks: list[BottleneckResponse] = []
+    use_cases: list[UseCaseResponse] = []
+    risks: list[RiskResponse] = []
+    roadmap_items: list[RoadmapResponse] = []
+    extracted_signals: list[SignalResponse] = []
+    client: ClientResponse | None = None
 
     class Config:
         from_attributes = True

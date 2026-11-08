@@ -1,6 +1,8 @@
 import logging
+
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker
+
 from app.core.config import settings
 
 logging.basicConfig(level=logging.INFO)
@@ -32,7 +34,7 @@ def init_db():
             logger.error(
                 "PostgreSQL connection failed while REQUIRE_POSTGRES=true. Refusing SQLite fallback."
             )
-            raise e
+            raise
         logger.warning(f"PostgreSQL connection failed ({e}). Falling back to SQLite...")
         try:
             sqlite_url = settings.SQLITE_URL
@@ -45,7 +47,7 @@ def init_db():
             SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
         except Exception as sqle:
             logger.error(f"SQLite initialization also failed! {sqle}")
-            raise sqle
+            raise
 
 
 # Initialize DB on import/startup
@@ -161,3 +163,14 @@ def ensure_runtime_schema():
                 logger.info("Adding missing document_signals.%s column...", column_name)
                 with engine.begin() as conn:
                     conn.execute(text(ddl))
+
+    for table_name in ("process_bottlenecks", "ai_use_cases", "risk_registers"):
+        if table_name not in inspector.get_table_names():
+            continue
+        cols = {column["name"] for column in inspector.get_columns(table_name)}
+        if "evidence_refs" not in cols:
+            logger.info("Adding missing %s.evidence_refs column...", table_name)
+            with engine.begin() as conn:
+                conn.execute(
+                    text(f"ALTER TABLE {table_name} ADD COLUMN evidence_refs JSON")
+                )

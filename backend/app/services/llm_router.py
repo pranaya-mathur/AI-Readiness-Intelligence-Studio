@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import re
 import time
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import requests
 
@@ -32,8 +33,8 @@ class ModelRunRecord:
     model: str
     status: str  # success | failed | demo_simulated | skipped
     execution_mode: str  # real | demo
-    error: Optional[str] = None
-    latency_ms: Optional[int] = None
+    error: str | None = None
+    latency_ms: int | None = None
     attempt: int = 1
 
 
@@ -44,10 +45,10 @@ class LLMResult:
     model: str
     status: str
     execution_mode: str
-    error: Optional[str] = None
-    runs: List[ModelRunRecord] = field(default_factory=list)
+    error: str | None = None
+    runs: list[ModelRunRecord] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "provider": self.provider,
             "model": self.model,
@@ -66,7 +67,7 @@ def _extract_prompt_field(prompt: str, label: str) -> str:
     return " ".join(match.group(1).strip().split())
 
 
-def _extract_list(prompt: str, label: str) -> List[str]:
+def _extract_list(prompt: str, label: str) -> list[str]:
     value = _extract_prompt_field(prompt, label)
     if not value:
         return []
@@ -111,20 +112,48 @@ UNTRUSTED_DOC_SYSTEM_SUFFIX = (
 )
 
 
+_SESSION_RUNS: contextvars.ContextVar[list[ModelRunRecord]] = contextvars.ContextVar(
+    "llm_router_session_runs"
+)
+_LAST_RESULT: contextvars.ContextVar[LLMResult | None] = contextvars.ContextVar(
+    "llm_router_last_result", default=None
+)
+
+
 class LLMRouter:
-    _session_runs: List[ModelRunRecord] = []
-    _last_result: Optional[LLMResult] = None
+    """Per-request/thread isolated model execution via contextvars."""
 
     @classmethod
     def reset_session(cls) -> None:
-        cls._session_runs = []
-        cls._last_result = None
+        _SESSION_RUNS.set([])
+        _LAST_RESULT.set(None)
 
     @classmethod
-    def session_summary(cls) -> Dict[str, Any]:
-        if cls._last_result:
-            return cls._last_result.to_dict()
-        if not cls._session_runs:
+    def _runs(cls) -> list[ModelRunRecord]:
+        try:
+            runs = _SESSION_RUNS.get()
+        except LookupError:
+            runs = []
+            _SESSION_RUNS.set(runs)
+        return runs
+
+    @classmethod
+    def _append_run(cls, record: ModelRunRecord) -> None:
+        runs = list(cls._runs())
+        runs.append(record)
+        _SESSION_RUNS.set(runs)
+
+    @classmethod
+    def _set_last(cls, result: LLMResult) -> None:
+        _LAST_RESULT.set(result)
+
+    @classmethod
+    def session_summary(cls) -> dict[str, Any]:
+        last = _LAST_RESULT.get()
+        runs = cls._runs()
+        if last:
+            return last.to_dict()
+        if not runs:
             return {
                 "provider": "none",
                 "model": "none",
@@ -133,14 +162,14 @@ class LLMRouter:
                 "error": None,
                 "runs": [],
             }
-        last = cls._session_runs[-1]
+        last_run = runs[-1]
         return {
-            "provider": last.provider,
-            "model": last.model,
-            "status": last.status,
-            "execution_mode": last.execution_mode,
-            "error": last.error,
-            "runs": [asdict(r) for r in cls._session_runs],
+            "provider": last_run.provider,
+            "model": last_run.model,
+            "status": last_run.status,
+            "execution_mode": last_run.execution_mode,
+            "error": last_run.error,
+            "runs": [asdict(r) for r in runs],
         }
 
     @classmethod
@@ -151,7 +180,7 @@ class LLMRouter:
         temperature: float = 0.2,
         max_tokens: int = 4000,
         require_json: bool = False,
-        retries: Optional[int] = None,
+        retries: int | None = None,
     ) -> str:
         result = cls.generate_completion_tracked(
             prompt=prompt,
@@ -171,7 +200,7 @@ class LLMRouter:
         temperature: float = 0.2,
         max_tokens: int = 4000,
         require_json: bool = False,
-        retries: Optional[int] = None,
+        retries: int | None = None,
     ) -> LLMResult:
         execution_mode = "demo" if settings.DEMO_MODE else "real"
         max_attempts = retries if retries is not None else settings.LLM_MAX_RETRIES
@@ -180,7 +209,7 @@ class LLMRouter:
             {"role": "system", "content": system},
             {"role": "user", "content": prompt},
         ]
-        errors: List[str] = []
+        errors: list[str] = []
 
         for attempt in range(1, max_attempts + 1):
             # 1) OpenAI (preferred when configured and external transmission permitted)
@@ -203,7 +232,7 @@ class LLMRouter:
                             _safe_json_loads(result.content)
                         except Exception as exc:
                             errors.append(f"openai_json_invalid:{exc}")
-                            cls._session_runs.append(
+                            cls._append_run(
                                 ModelRunRecord(
                                     provider="openai",
                                     model=settings.OPENAI_MODEL,
@@ -214,7 +243,7 @@ class LLMRouter:
                                 )
                             )
                             continue
-                    cls._last_result = result
+                    cls._set_last(result)
                     return result
                 errors.append(result.error or "openai_failed")
 
@@ -239,7 +268,7 @@ class LLMRouter:
                         except Exception as exc:
                             errors.append(f"groq_json_invalid:{exc}")
                             continue
-                    cls._last_result = result
+                    cls._set_last(result)
                     return result
                 errors.append(result.error or "groq_failed")
 
@@ -259,7 +288,7 @@ class LLMRouter:
                         except Exception as exc:
                             errors.append(f"ollama_json_invalid:{exc}")
                             continue
-                    cls._last_result = result
+                    cls._set_last(result)
                     return result
                 errors.append(result.error or "ollama_failed")
 
@@ -278,9 +307,9 @@ class LLMRouter:
                 status="demo_simulated",
                 execution_mode="demo",
                 error=joined,
-                runs=list(cls._session_runs),
+                runs=list(cls._runs()),
             )
-            cls._session_runs.append(
+            cls._append_run(
                 ModelRunRecord(
                     provider="demo_simulator",
                     model="deterministic_heuristic_v1",
@@ -289,7 +318,7 @@ class LLMRouter:
                     error=joined,
                 )
             )
-            cls._last_result = result
+            cls._set_last(result)
             return result
 
         failure = LLMResult(
@@ -299,9 +328,9 @@ class LLMRouter:
             status="failed",
             execution_mode=execution_mode,
             error=joined,
-            runs=list(cls._session_runs),
+            runs=list(cls._runs()),
         )
-        cls._last_result = failure
+        cls._set_last(failure)
         raise LLMExecutionError(
             f"Verified model analysis unavailable: {joined}",
             provider="none",
@@ -312,7 +341,7 @@ class LLMRouter:
     def _call_openai(
         cls,
         *,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         temperature: float,
         max_tokens: int,
         require_json: bool,
@@ -328,7 +357,7 @@ class LLMRouter:
                 "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
                 "Content-Type": "application/json",
             }
-            payload: Dict[str, Any] = {
+            payload: dict[str, Any] = {
                 "model": model,
                 "messages": messages,
                 "temperature": temperature,
@@ -350,17 +379,17 @@ class LLMRouter:
                     latency_ms=latency,
                     attempt=attempt,
                 )
-                cls._session_runs.append(record)
+                cls._append_run(record)
                 return LLMResult(
                     content=content,
                     provider="openai",
                     model=model,
                     status="success",
                     execution_mode=execution_mode,
-                    runs=list(cls._session_runs),
+                    runs=list(cls._runs()),
                 )
             err = f"HTTP {response.status_code}: {response.text[:300]}"
-            cls._session_runs.append(
+            cls._append_run(
                 ModelRunRecord(
                     provider="openai",
                     model=model,
@@ -378,12 +407,12 @@ class LLMRouter:
                 status="failed",
                 execution_mode=execution_mode,
                 error=err,
-                runs=list(cls._session_runs),
+                runs=list(cls._runs()),
             )
         except Exception as exc:
             latency = int((time.time() - started) * 1000)
             err = str(exc)
-            cls._session_runs.append(
+            cls._append_run(
                 ModelRunRecord(
                     provider="openai",
                     model=model,
@@ -401,14 +430,14 @@ class LLMRouter:
                 status="failed",
                 execution_mode=execution_mode,
                 error=err,
-                runs=list(cls._session_runs),
+                runs=list(cls._runs()),
             )
 
     @classmethod
     def _call_groq(
         cls,
         *,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         temperature: float,
         max_tokens: int,
         require_json: bool,
@@ -424,7 +453,7 @@ class LLMRouter:
                 "Authorization": f"Bearer {settings.GROQ_API_KEY}",
                 "Content-Type": "application/json",
             }
-            payload: Dict[str, Any] = {
+            payload: dict[str, Any] = {
                 "model": model,
                 "messages": messages,
                 "temperature": temperature,
@@ -438,7 +467,7 @@ class LLMRouter:
             latency = int((time.time() - started) * 1000)
             if response.status_code == 200:
                 content = response.json()["choices"][0]["message"]["content"]
-                cls._session_runs.append(
+                cls._append_run(
                     ModelRunRecord(
                         provider="groq",
                         model=model,
@@ -454,10 +483,10 @@ class LLMRouter:
                     model=model,
                     status="success",
                     execution_mode=execution_mode,
-                    runs=list(cls._session_runs),
+                    runs=list(cls._runs()),
                 )
             err = f"HTTP {response.status_code}: {response.text[:300]}"
-            cls._session_runs.append(
+            cls._append_run(
                 ModelRunRecord(
                     provider="groq",
                     model=model,
@@ -475,12 +504,12 @@ class LLMRouter:
                 status="failed",
                 execution_mode=execution_mode,
                 error=err,
-                runs=list(cls._session_runs),
+                runs=list(cls._runs()),
             )
         except Exception as exc:
             latency = int((time.time() - started) * 1000)
             err = str(exc)
-            cls._session_runs.append(
+            cls._append_run(
                 ModelRunRecord(
                     provider="groq",
                     model=model,
@@ -498,14 +527,14 @@ class LLMRouter:
                 status="failed",
                 execution_mode=execution_mode,
                 error=err,
-                runs=list(cls._session_runs),
+                runs=list(cls._runs()),
             )
 
     @classmethod
     def _call_ollama(
         cls,
         *,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         temperature: float,
         require_json: bool,
         attempt: int,
@@ -520,7 +549,7 @@ class LLMRouter:
         try:
             logger.info("Routing request to Local Ollama (%s)...", model)
             url = f"{settings.OLLAMA_HOST}/api/chat"
-            ollama_payload: Dict[str, Any] = {
+            ollama_payload: dict[str, Any] = {
                 "model": model,
                 "messages": messages,
                 "options": {"temperature": temperature},
@@ -534,7 +563,7 @@ class LLMRouter:
             latency = int((time.time() - started) * 1000)
             if response.status_code == 200:
                 content = response.json()["message"]["content"]
-                cls._session_runs.append(
+                cls._append_run(
                     ModelRunRecord(
                         provider="ollama",
                         model=model,
@@ -550,10 +579,10 @@ class LLMRouter:
                     model=model,
                     status="success",
                     execution_mode=execution_mode,
-                    runs=list(cls._session_runs),
+                    runs=list(cls._runs()),
                 )
             err = f"HTTP {response.status_code}: {response.text[:300]}"
-            cls._session_runs.append(
+            cls._append_run(
                 ModelRunRecord(
                     provider="ollama",
                     model=model,
@@ -571,12 +600,12 @@ class LLMRouter:
                 status="failed",
                 execution_mode=execution_mode,
                 error=err,
-                runs=list(cls._session_runs),
+                runs=list(cls._runs()),
             )
         except Exception as exc:
             latency = int((time.time() - started) * 1000)
             err = str(exc)
-            cls._session_runs.append(
+            cls._append_run(
                 ModelRunRecord(
                     provider="ollama",
                     model=model,
@@ -594,11 +623,11 @@ class LLMRouter:
                 status="failed",
                 execution_mode=execution_mode,
                 error=err,
-                runs=list(cls._session_runs),
+                runs=list(cls._runs()),
             )
 
     @staticmethod
-    def generate_embeddings(text: str) -> List[float]:
+    def generate_embeddings(text: str) -> list[float]:
         if settings.USE_OLLAMA:
             try:
                 url = f"{settings.OLLAMA_HOST}/api/embeddings"
@@ -617,7 +646,7 @@ class LLMRouter:
         raise LLMExecutionError("Embedding provider unavailable outside DEMO_MODE")
 
     @staticmethod
-    def _mock_embeddings(text: str) -> List[float]:
+    def _mock_embeddings(text: str) -> list[float]:
         import hashlib
 
         import numpy as np
@@ -657,7 +686,7 @@ class LLMRouter:
             )
 
         lower = prompt.lower()
-        payload: Dict[str, Any]
+        payload: dict[str, Any]
         if "extracted_signals" in lower or "document understanding" in lower:
             payload = {
                 "extracted_signals": [

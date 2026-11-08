@@ -1,7 +1,6 @@
 import io
 import logging
 import os
-from typing import List, Optional
 
 import fitz  # PyMuPDF for quick PDF parses
 from docx import Document as DocxDocument
@@ -31,14 +30,46 @@ from app.schemas.assessment import (
     AssessmentUpdate,
 )
 from app.services.document_generators import DocumentGenerators
+from app.services.evidence_links import (
+    enrich_finding_with_validated_refs,
+    index_assessment_evidence,
+)
 from app.services.scoring import ScoringEngine
-
 
 logger = logging.getLogger("AssessmentAPI")
 router = APIRouter()
 
 orchestrator = AssessmentOrchestrator()
 VALID_APPROVAL_STATUSES = {"draft", "reviewed", "approved"}
+
+
+def _assessment_is_client_exportable(ass: Assessment) -> tuple[bool, str]:
+    """Real client exports require a completed, non-demo, non-simulated analysis."""
+    status = (ass.status or "").lower()
+    if status in {"incomplete", "failed", "processing", "intake", "uploading"}:
+        return (
+            False,
+            f"Assessment status '{status}' is not exportable as a verified client report",
+        )
+    analysis_mode = (getattr(ass, "analysis_mode", None) or "").lower()
+    model_status = (getattr(ass, "model_run_status", None) or "").lower()
+    if analysis_mode == "demo" or model_status == "demo_simulated":
+        return (
+            False,
+            "Demo/simulated analysis cannot be exported as a verified client assessment",
+        )
+    if getattr(ass, "insufficient_evidence", 0):
+        # Still allow export after human approval only if not incomplete/demo;
+        # insufficient evidence alone is a warning, not a hard block once reviewed.
+        pass
+    return True, ""
+
+
+def _is_internal_demo_export(ass: Assessment, mode: str | None) -> bool:
+    return (mode or "").lower() == "demo" or (
+        (getattr(ass, "analysis_mode", None) or "").lower() == "demo"
+        and (mode or "").lower() in {"demo", "showcase"}
+    )
 
 
 def normalize_department(use_case_name: str, description: str) -> str:
@@ -127,6 +158,7 @@ def _db_assessment_to_dict(ass: Assessment) -> dict:
                 "process_name": b.process_name,
                 "bottleneck_description": b.bottleneck_description,
                 "ai_potential": b.ai_potential,
+                "evidence_refs": getattr(b, "evidence_refs", None) or [],
             }
             for b in ass.bottlenecks
         ],
@@ -141,6 +173,7 @@ def _db_assessment_to_dict(ass: Assessment) -> dict:
                 "priority": u.priority,
                 "evidence": u.evidence,
                 "confidence": u.confidence,
+                "evidence_refs": getattr(u, "evidence_refs", None) or [],
             }
             for u in ass.use_cases
         ],
@@ -150,6 +183,7 @@ def _db_assessment_to_dict(ass: Assessment) -> dict:
                 "severity": r.severity,
                 "recommendation": r.recommendation,
                 "is_control_met": r.is_control_met,
+                "evidence_refs": getattr(r, "evidence_refs", None) or [],
             }
             for r in ass.risks
         ],
@@ -248,7 +282,7 @@ def create_assessment(
     return ass
 
 
-@router.get("/", response_model=List[AssessmentResponse])
+@router.get("/", response_model=list[AssessmentResponse])
 def list_assessments(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -277,7 +311,6 @@ def delete_assessment(
 
     db.delete(ass)
     db.commit()
-    return None
 
 
 @router.get("/{id}", response_model=AssessmentResponse)
@@ -318,9 +351,7 @@ def _validate_upload_file(upload: UploadFile, content: bytes) -> None:
         )
 
 
-def _parse_upload_bytes(
-    filename: str, content: bytes
-) -> tuple[str, list, Optional[str]]:
+def _parse_upload_bytes(filename: str, content: bytes) -> tuple[str, list, str | None]:
     """Returns (text, pages, parse_error)."""
     pages: list = []
     try:
@@ -357,7 +388,7 @@ def _parse_upload_bytes(
 @router.post("/{id}/upload", response_model=AssessmentResponse)
 def upload_documents(
     id: int,
-    files: List[UploadFile] = File(...),
+    files: list[UploadFile] = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -549,29 +580,36 @@ def upload_documents(
         db.query(ProcessBottleneck).filter(
             ProcessBottleneck.assessment_id == ass.id
         ).delete()
+        evidence_index = index_assessment_evidence(
+            (final_state.get("evidence_package") or {}).get("evidence_items") or []
+        )
         for b in final_state.get("bottlenecks", []):
+            validated = enrich_finding_with_validated_refs(b, evidence_index)
             db.add(
                 ProcessBottleneck(
                     assessment_id=ass.id,
-                    department=b.get("department", "Unknown"),
+                    department=validated.get("department", "Unknown"),
                     process_name=sanitize_text(
-                        b.get("process_name"), "Insufficient Evidence"
+                        validated.get("process_name"), "Insufficient Evidence"
                     ),
                     bottleneck_description=sanitize_text(
-                        b.get("bottleneck_description"),
+                        validated.get("bottleneck_description"),
                         "Insufficient verified evidence to describe this bottleneck.",
                     ),
-                    ai_potential=b.get("ai_potential", "Unknown"),
+                    ai_potential=validated.get("ai_potential", "Unknown"),
+                    evidence_refs=validated.get("evidence_refs") or [],
                 )
             )
 
         db.query(AIUseCase).filter(AIUseCase.assessment_id == ass.id).delete()
         for u in final_state.get("use_cases", []):
+            validated = enrich_finding_with_validated_refs(u, evidence_index)
             uc_name = sanitize_text(
-                u.get("use_case_name"), "Insufficient Evidence — Discovery Deferred"
+                validated.get("use_case_name"),
+                "Insufficient Evidence — Discovery Deferred",
             )
             uc_desc = sanitize_text(
-                u.get("description"),
+                validated.get("description"),
                 "Use-case discovery incomplete due to missing verified evidence.",
             )
             db.add(
@@ -580,34 +618,42 @@ def upload_documents(
                     department=normalize_department(uc_name, uc_desc),
                     use_case_name=uc_name,
                     description=uc_desc,
-                    value=u.get("value", "Unknown"),
-                    complexity=u.get("complexity", "Unknown"),
-                    risk=u.get("risk", "Unknown"),
-                    priority=u.get("priority", "P3"),
+                    value=validated.get("value", "Unknown"),
+                    complexity=validated.get("complexity", "Unknown"),
+                    risk=validated.get("risk", "Unknown"),
+                    priority=validated.get("priority", "P3"),
                     evidence=sanitize_text(
-                        u.get("evidence"),
+                        validated.get("evidence"),
                         "Insufficient verified evidence.",
                     ),
                     confidence=0.0,
+                    evidence_refs=validated.get("evidence_refs") or [],
                 )
             )
 
         db.query(RiskRegister).filter(RiskRegister.assessment_id == ass.id).delete()
         for r in final_state.get("risks", []):
+            validated = enrich_finding_with_validated_refs(r, evidence_index)
+            # Keyword/document cues never prove a control is met.
+            control_met = 0
+            if validated.get("evidence_tier") == "verified" and validated.get(
+                "evidence_refs"
+            ):
+                control_met = int(validated.get("is_control_met", 0) or 0)
             db.add(
                 RiskRegister(
                     assessment_id=ass.id,
                     risk_name=sanitize_text(
-                        r.get("risk_name"), "Insufficient Evidence for Risk Closure"
+                        validated.get("risk_name"),
+                        "Insufficient Evidence for Risk Closure",
                     ),
-                    severity=r.get("severity", "High"),
+                    severity=validated.get("severity", "High"),
                     recommendation=sanitize_text(
-                        r.get("recommendation"),
+                        validated.get("recommendation"),
                         "Collect verified governance/security evidence before external model use.",
                     ),
-                    is_control_met=0
-                    if r.get("evidence_tier") != "verified"
-                    else int(r.get("is_control_met", 0) or 0),
+                    is_control_met=control_met,
+                    evidence_refs=validated.get("evidence_refs") or [],
                 )
             )
 
@@ -694,15 +740,13 @@ def upload_documents(
                 assessment_id=ass.id,
                 source_file="LangGraphOrchestrator",
                 signal_type="Execution Failure",
-                description=f"Pipeline crashed with message: {str(e)}",
+                description=f"Pipeline crashed with message: {e!s}",
                 confidence=0.0,
                 evidence_tier="missing",
             )
         )
         db.commit()
-        raise HTTPException(
-            status_code=500, detail=f"AI Graph analysis failed: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"AI Graph analysis failed: {e!s}")
 
     return ass
 
@@ -749,6 +793,33 @@ def update_assessment(
             and value not in VALID_APPROVAL_STATUSES
         ):
             raise HTTPException(status_code=400, detail="Invalid approval status")
+        if key == "approval_status" and value in {"reviewed", "approved"}:
+            exportable, _reason = _assessment_is_client_exportable(ass)
+            # Demo/simulated/incomplete cannot be promoted as verified client assessments.
+            if (
+                not exportable
+                and (getattr(ass, "analysis_mode", "") or "").lower() == "demo"
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Demo/simulated assessments cannot be approved as verified "
+                        "client deliverables. Use internal demo export mode instead."
+                    ),
+                )
+            if (ass.status or "").lower() in {"incomplete", "failed"}:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"Cannot approve an assessment with status '{ass.status}'. "
+                        "Re-run analysis successfully first."
+                    ),
+                )
+            if (getattr(ass, "model_run_status", "") or "").lower() == "demo_simulated":
+                raise HTTPException(
+                    status_code=409,
+                    detail="Simulated model output cannot be approved as verified analysis.",
+                )
         setattr(ass, key, value)
 
     # Update Use Cases if provided
@@ -863,7 +934,7 @@ def update_assessment(
 def export_assessment_report(
     id: int,
     doc_format: str,
-    mode: Optional[str] = None,
+    mode: str | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -875,15 +946,28 @@ def export_assessment_report(
     )
     if not ass:
         raise HTTPException(status_code=404, detail="Assessment not found")
-    if ass.approval_status != "approved":
-        raise HTTPException(
-            status_code=409,
-            detail="Assessment must be approved in Human Review Mode before export.",
+    internal_demo = _is_internal_demo_export(ass, mode)
+    if internal_demo:
+        # Clearly marked internal demo path — not a verified client deliverable.
+        data = _db_assessment_to_dict(ass)
+        data["export_mode"] = "demo"
+        data["client_summary"] = "[DEMO_SIMULATED / INTERNAL ONLY] " + (
+            data.get("client_summary") or data.get("business_summary") or ""
         )
+        data["company_name"] = f"[DEMO] {data.get('company_name') or 'Demo Client'}"
+    else:
+        if ass.approval_status != "approved":
+            raise HTTPException(
+                status_code=409,
+                detail="Assessment must be approved in Human Review Mode before export.",
+            )
+        exportable, reason = _assessment_is_client_exportable(ass)
+        if not exportable:
+            raise HTTPException(status_code=409, detail=reason)
 
-    # Serialize DB object to dictionary structure
-    data = _db_assessment_to_dict(ass)
-    data["export_mode"] = mode
+        # Serialize DB object to dictionary structure
+        data = _db_assessment_to_dict(ass)
+        data["export_mode"] = mode
 
     if doc_format.lower() == "pdf":
         pdf_buffer = DocumentGenerators.generate_pdf_report(data)

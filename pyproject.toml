@@ -1,0 +1,19 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+src = ["backend"]
+
+[tool.ruff.lint]
+# Keep Ruff 0.17+ defaults usable for FastAPI without rewriting the stack.
+ignore = [
+  "B008",   # FastAPI Depends()/File() in defaults is idiomatic
+  "BLE001", # Broad except used intentionally for provider/parse resilience
+  "DTZ003", # Legacy utcnow usage retained for schema compatibility
+]
+
+[tool.ruff.lint.per-file-ignores]
+"backend/tests/*" = ["S101"]
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+pythonpath = ["backend"]

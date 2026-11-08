@@ -24,7 +24,7 @@ def test_multi_document_provenance_and_excerpts():
     assert any(i.source_file == "ops_sop.txt" for i in package.evidence_items)
     assert any(i.page_or_section for i in package.evidence_items)
     assert any(i.excerpt for i in package.evidence_items)
-    assert any(i.evidence_tier == "verified" for i in package.evidence_items)
+    assert any(i.evidence_tier == "document_observed" for i in package.evidence_items)
     rows = EvidenceExtractor.as_signal_rows(package)
     assert rows[0]["evidence_id"]
     assert rows[0]["document_id"]
@@ -58,9 +58,11 @@ def test_conflicting_and_corrupt_files_are_marked_missing():
     assert any(
         "broken.pdf" in n or "corrupt" in n.lower() for n in package.analysis_notes
     )
-    # Both conflicting statements remain as verified excerpts; no fabricated resolution.
-    verified = [i for i in package.evidence_items if i.evidence_tier == "verified"]
-    assert len(verified) >= 1
+    # Both conflicting statements remain as document-observed cues; no fabricated resolution.
+    observed = [
+        i for i in package.evidence_items if i.evidence_tier == "document_observed"
+    ]
+    assert len(observed) >= 1
 
 
 def test_document_content_is_wrapped_as_untrusted():

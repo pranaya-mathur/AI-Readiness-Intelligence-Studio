@@ -1,13 +1,15 @@
 import io
 import logging
 from datetime import datetime
-from typing import Dict, Any
-from xhtml2pdf import pisa
+from typing import Any
+
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor
 from pptx import Presentation
-from pptx.util import Inches as PtInches, Pt as PtFont
 from pptx.dml.color import RGBColor as PptRGBColor
+from pptx.util import Inches as PtInches
+from pptx.util import Pt as PtFont
+from xhtml2pdf import pisa
 
 from app.core.sanitizer import sanitize_text
 
@@ -16,7 +18,7 @@ logger = logging.getLogger("DocumentGenerators")
 
 class DocumentGenerators:
     @staticmethod
-    def cleanup_export_data(assessment: Dict[str, Any]) -> Dict[str, Any]:
+    def cleanup_export_data(assessment: dict[str, Any]) -> dict[str, Any]:
         """
         Deep cleanses exported assessment payload to remove any E2E/test override language,
         sharpens risk recommendations, normalizes departments, and prepares publication-grade
@@ -246,7 +248,7 @@ class DocumentGenerators:
         return action, impact
 
     @staticmethod
-    def calculate_commercial_strategy(assessment: Dict[str, Any]) -> Dict[str, Any]:
+    def calculate_commercial_strategy(assessment: dict[str, Any]) -> dict[str, Any]:
         """
         Dynamically calculates engagement model, pricing, justifications, and teams
         matching the frontend dashboard formulas to keep them in perfect sync.
@@ -267,11 +269,8 @@ class DocumentGenerators:
         s_score = assessment.get("security_readiness") or 60.0
         t_score = assessment.get("team_readiness") or 60.0
         b_score = assessment.get("business_alignment") or 60.0
-        avg_score = int(
-            round(
-                (d_score + p_score + i_score + g_score + s_score + t_score + b_score)
-                / 7.0
-            )
+        avg_score = round(
+            (d_score + p_score + i_score + g_score + s_score + t_score + b_score) / 7.0
         )
 
         recommended_pilot = (
@@ -585,7 +584,7 @@ class DocumentGenerators:
         }
 
     @staticmethod
-    def generate_pdf_report(assessment: Dict[str, Any]) -> io.BytesIO:
+    def generate_pdf_report(assessment: dict[str, Any]) -> io.BytesIO:
         """
         Generates a premium CSS-styled PDF report summarizing the assessment.
         """
@@ -1006,7 +1005,7 @@ class DocumentGenerators:
         return pdf_buffer
 
     @staticmethod
-    def generate_docx_proposal(assessment: Dict[str, Any]) -> io.BytesIO:
+    def generate_docx_proposal(assessment: dict[str, Any]) -> io.BytesIO:
         """
         Generates a professionally structured proposal in MS Word format.
         """
@@ -1210,7 +1209,7 @@ class DocumentGenerators:
         return docx_buffer
 
     @staticmethod
-    def generate_pptx_deck(assessment: Dict[str, Any]) -> io.BytesIO:
+    def generate_pptx_deck(assessment: dict[str, Any]) -> io.BytesIO:
         """
         Generates a modern slide presentation in PPTX format.
         """

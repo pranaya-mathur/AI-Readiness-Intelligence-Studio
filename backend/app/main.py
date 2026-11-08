@@ -1,13 +1,14 @@
 import logging
+
 import uvicorn
-from fastapi import FastAPI
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from app.core.config import settings
-from app.core.database import engine, Base, ensure_runtime_schema, get_database_health
+
+from app.api.assessment import router as assessment_router
 from app.api.auth import router as auth_router
 from app.api.clients import router as clients_router
-from app.api.assessment import router as assessment_router
+from app.core.config import settings
+from app.core.database import Base, engine, ensure_runtime_schema, get_database_health
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("AppMain")

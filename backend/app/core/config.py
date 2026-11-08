@@ -1,10 +1,10 @@
 import os
-from typing import ClassVar, List, Optional
+from typing import ClassVar
 
 from pydantic_settings import BaseSettings
 
 
-def _parse_cors_origins() -> List[str]:
+def _parse_cors_origins() -> list[str]:
     raw_value = os.getenv("CORS_ORIGINS")
     if raw_value:
         return [origin.strip() for origin in raw_value.split(",") if origin.strip()]
@@ -55,9 +55,9 @@ class Settings(BaseSettings):
     SQLITE_URL: str = os.getenv("SQLITE_URL", "sqlite:///./aireadiness.db")
 
     # --- Model execution / safety ---
-    OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY", "") or ""
+    OPENAI_API_KEY: str | None = os.getenv("OPENAI_API_KEY", "") or ""
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-    GROQ_API_KEY: Optional[str] = os.getenv("GROQ_API_KEY", "") or ""
+    GROQ_API_KEY: str | None = os.getenv("GROQ_API_KEY", "") or ""
     OLLAMA_HOST: str = os.getenv("OLLAMA_HOST", "http://localhost:11434")
     USE_OLLAMA: bool = _env_bool("USE_OLLAMA", "false")
     ALLOW_OLLAMA_FALLBACK: bool = _env_bool("ALLOW_OLLAMA_FALLBACK", "true")
@@ -105,14 +105,14 @@ class Settings(BaseSettings):
     INSECURE_DEFAULT_SECRET: ClassVar[str] = "super-secret-key-change-in-production"
 
     @property
-    def cors_origins(self) -> List[str]:
+    def cors_origins(self) -> list[str]:
         raw_value = self.CORS_ORIGINS_RAW.strip()
         if not raw_value:
             return []
         return [origin.strip() for origin in raw_value.split(",") if origin.strip()]
 
     @property
-    def allowed_upload_extensions(self) -> List[str]:
+    def allowed_upload_extensions(self) -> list[str]:
         return [
             ext.strip().lower()
             for ext in self.ALLOWED_UPLOAD_EXTENSIONS.split(",")
@@ -122,7 +122,7 @@ class Settings(BaseSettings):
     def validate_production_safety(self) -> None:
         if self.ENVIRONMENT.lower() not in {"production", "prod"}:
             return
-        problems: List[str] = []
+        problems: list[str] = []
         if not self.SECRET_KEY or self.SECRET_KEY == self.INSECURE_DEFAULT_SECRET:
             problems.append(
                 "SECRET_KEY must be set to a non-default value in production"

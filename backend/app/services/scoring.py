@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any
 
 SCORING_RUBRIC_VERSION = "v1.0.0"
 
 # Configurable rule weights — overall is always recomputed from these.
-DIMENSION_WEIGHTS: Dict[str, float] = {
+DIMENSION_WEIGHTS: dict[str, float] = {
     "data_readiness": 0.20,
     "process_readiness": 0.15,
     "integration_readiness": 0.15,
@@ -26,12 +27,12 @@ class DimensionScore:
     dimension: str
     score: float
     justification: str
-    evidence_refs: List[str] = field(default_factory=list)
-    missing_information: List[str] = field(default_factory=list)
+    evidence_refs: list[str] = field(default_factory=list)
+    missing_information: list[str] = field(default_factory=list)
     reviewer_status: str = "pending"  # pending | reviewed | approved
-    estimate_flags: List[str] = field(default_factory=list)
+    estimate_flags: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -39,14 +40,14 @@ class DimensionScore:
 class Scorecard:
     rubric_version: str
     scoring_method: str
-    dimensions: Dict[str, DimensionScore]
+    dimensions: dict[str, DimensionScore]
     overall_score: float
     automation_potential: float
     automation_potential_basis: str
     readiness_interpretation: str
     insufficient_evidence: bool
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "rubric_version": self.rubric_version,
             "scoring_method": self.scoring_method,
@@ -58,9 +59,9 @@ class Scorecard:
             "insufficient_evidence": self.insufficient_evidence,
         }
 
-    def flat_assessment_fields(self) -> Dict[str, Any]:
+    def flat_assessment_fields(self) -> dict[str, Any]:
         """Dashboard-compatible flat fields."""
-        out: Dict[str, Any] = {
+        out: dict[str, Any] = {
             "overall_score": self.overall_score,
             "automation_potential": self.automation_potential,
             "readiness_interpretation": self.readiness_interpretation,
@@ -89,7 +90,7 @@ class ScoringEngine:
     """Rule-based readiness scoring grounded in intake + evidence package."""
 
     @staticmethod
-    def weighted_overall(dimension_scores: Dict[str, float]) -> float:
+    def weighted_overall(dimension_scores: dict[str, float]) -> float:
         total = 0.0
         for key, weight in DIMENSION_WEIGHTS.items():
             value = float(dimension_scores.get(key, 0.0))
@@ -110,25 +111,26 @@ class ScoringEngine:
         compliance_requirements: Sequence[str],
         cloud_preference: str,
         main_business_goals: str,
-        evidence_package: Optional[Dict[str, Any]] = None,
-        bottlenecks: Optional[Sequence[Dict[str, Any]]] = None,
-        use_cases: Optional[Sequence[Dict[str, Any]]] = None,
+        evidence_package: dict[str, Any] | None = None,
+        bottlenecks: Sequence[dict[str, Any]] | None = None,
+        use_cases: Sequence[dict[str, Any]] | None = None,
     ) -> Scorecard:
         evidence_package = evidence_package or {}
         evidence_items = evidence_package.get("evidence_items") or []
         insufficient = bool(evidence_package.get("insufficient_evidence"))
 
-        def refs_for(*dims: str) -> List[str]:
-            found: List[str] = []
+        def refs_for(*dims: str) -> list[str]:
+            """Only cite evidence explicitly related to the requested dimensions."""
+            found: list[str] = []
             for item in evidence_items:
-                related = item.get("related_dimensions") or []
-                if (
-                    any(d in related for d in dims)
-                    or item.get("evidence_tier") == "verified"
-                ):
-                    eid = item.get("evidence_id")
-                    if eid and eid not in found:
-                        found.append(eid)
+                related = [
+                    str(d).lower() for d in (item.get("related_dimensions") or [])
+                ]
+                if not any(d.lower() in related for d in dims):
+                    continue
+                eid = item.get("evidence_id")
+                if eid and eid not in found:
+                    found.append(str(eid))
             return found[:6]
 
         tools_l = [t.lower() for t in current_tools]
@@ -136,16 +138,21 @@ class ScoringEngine:
         goals_l = [g.lower() for g in ai_goals]
         compliance_l = [c.lower() for c in compliance_requirements]
 
-        verified = [e for e in evidence_items if e.get("evidence_tier") == "verified"]
+        # document_observed cues are weaker than verified operational proof.
+        observed = [
+            e
+            for e in evidence_items
+            if e.get("evidence_tier") in {"document_observed", "verified"}
+        ]
         verified_types = " ".join(
             f"{e.get('signal_type', '')} {e.get('description', '')}".lower()
-            for e in verified
+            for e in observed
         )
 
         # --- Data ---
         data_score = 58.0
-        data_missing: List[str] = []
-        data_flags: List[str] = []
+        data_missing: list[str] = []
+        data_flags: list[str] = []
         if any(
             "excel" in t or "spreadsheet" in t for t in tools_l
         ) or "data silos" in " ".join(pains_l):
@@ -153,10 +160,10 @@ class ScoringEngine:
         if any(
             k in verified_types for k in ("data source", "database", "warehouse", "crm")
         ):
-            data_score += 8
+            data_score += 4  # cue-only uplift
         else:
             data_missing.append(
-                "No verified evidence of structured/accessible data assets."
+                "No document-observed cues for structured/accessible data assets."
             )
             data_score -= 8
         if insufficient:
@@ -166,15 +173,15 @@ class ScoringEngine:
 
         # --- Process ---
         process_score = 55.0
-        process_missing: List[str] = []
+        process_missing: list[str] = []
         if any("manual" in p for p in pains_l):
             process_score -= 8
         if any(
             k in verified_types for k in ("workflow", "process", "sop", "bottleneck")
         ):
-            process_score += 10
+            process_score += 5  # cue-only uplift
         else:
-            process_missing.append("No verified process/SOP evidence uploaded.")
+            process_missing.append("No document-observed process/SOP cues uploaded.")
             process_score -= 7
         if bottlenecks:
             process_score += min(6.0, 2.0 * len(list(bottlenecks)))
@@ -182,7 +189,7 @@ class ScoringEngine:
 
         # --- Integration ---
         integration_score = 52.0
-        integration_missing: List[str] = []
+        integration_missing: list[str] = []
         modern = any(
             t in " ".join(tools_l)
             for t in ("salesforce", "jira", "sharepoint", "aws", "azure", "gcp", "api")
@@ -190,9 +197,11 @@ class ScoringEngine:
         if modern:
             integration_score += 8
         if "integration" in verified_types or "api" in verified_types:
-            integration_score += 8
+            integration_score += 4
         else:
-            integration_missing.append("No verified integration/API maturity evidence.")
+            integration_missing.append(
+                "No document-observed integration/API maturity cues."
+            )
             integration_score -= 6
         if cloud_preference and "agnostic" not in cloud_preference.lower():
             integration_score += 4
@@ -200,16 +209,19 @@ class ScoringEngine:
 
         # --- Governance ---
         governance_score = 50.0
-        governance_missing: List[str] = []
+        governance_missing: list[str] = []
         if compliance_l:
             governance_score += min(12.0, 4.0 * len(compliance_l))
         if any(
             k in verified_types for k in ("governance", "audit", "policy", "compliance")
         ):
-            governance_score += 10
+            governance_score += 4  # cue-only; not proof controls operate
+            governance_missing.append(
+                "Governance language observed in documents is not proof controls are operational."
+            )
         else:
             governance_missing.append(
-                "No verified AI/data governance controls in documents."
+                "No document-observed AI/data governance control cues."
             )
             governance_score -= 5
         if compliance_l and "governance" not in verified_types:
@@ -221,7 +233,7 @@ class ScoringEngine:
 
         # --- Security ---
         security_score = 55.0
-        security_missing: List[str] = []
+        security_missing: list[str] = []
         if any(
             k in " ".join(compliance_l)
             for k in ("soc2", "soc 2", "hipaa", "iso", "gdpr")
@@ -231,24 +243,27 @@ class ScoringEngine:
             k in verified_types
             for k in ("security", "access control", "encryption", "pii")
         ):
-            security_score += 8
+            security_score += 4  # cue-only
+            security_missing.append(
+                "Security language observed is not proof controls are enforced."
+            )
         else:
             security_missing.append(
-                "No verified security-control evidence in documents."
+                "No document-observed security-control cues in documents."
             )
             security_score -= 5
         security_score = max(20.0, min(93.0, security_score))
 
         # --- Team ---
         team_score = 48.0
-        team_missing: List[str] = []
+        team_missing: list[str] = []
         if any(k in " ".join(goals_l) for k in ("upskill", "training", "enablement")):
             team_score += 10
         if "team" in verified_types or "training" in verified_types:
-            team_score += 8
+            team_score += 4  # cue-only
         else:
             team_missing.append(
-                "No verified evidence of AI talent or change ownership."
+                "No document-observed cues for AI talent or change ownership."
             )
             team_score -= 6
         if departments:
@@ -257,7 +272,7 @@ class ScoringEngine:
 
         # --- Business alignment ---
         alignment_score = 60.0
-        alignment_missing: List[str] = []
+        alignment_missing: list[str] = []
         if main_business_goals.strip():
             alignment_score += 8
         else:
@@ -277,7 +292,8 @@ class ScoringEngine:
                 score=round(data_score, 1),
                 justification=(
                     f"Scored from tools ({', '.join(list(current_tools)[:3]) or 'unspecified'}), "
-                    f"pain points, and {len(verified)} verified document findings."
+                    f"pain points, and {len(observed)} document-observed cues "
+                    "(not operational proof)."
                 ),
                 evidence_refs=refs_for("data"),
                 missing_information=data_missing,
@@ -290,7 +306,7 @@ class ScoringEngine:
                     "Process score reflects documented workflow cues and reported manual pain points; "
                     "standardization remains limited without SOP coverage."
                     if process_missing
-                    else "Process score reflects verified workflow/SOP evidence alongside reported bottlenecks."
+                    else "Process score reflects document-observed workflow/SOP cues alongside reported bottlenecks."
                 ),
                 evidence_refs=refs_for("process", "bottleneck"),
                 missing_information=process_missing,
@@ -311,7 +327,7 @@ class ScoringEngine:
                 justification=(
                     f"Governance score balances asserted requirements "
                     f"({', '.join(list(compliance_requirements)[:3]) or 'none stated'}) "
-                    "against verified policy/control evidence."
+                    "against document-observed policy/control cues (not operational proof)."
                 ),
                 evidence_refs=refs_for("governance"),
                 missing_information=governance_missing,
@@ -320,7 +336,7 @@ class ScoringEngine:
                 dimension="security_readiness",
                 score=round(security_score, 1),
                 justification=(
-                    "Security posture estimated from compliance assertions and any verified control language; "
+                    "Security posture estimated from compliance assertions and document-observed control language; "
                     "AI-specific handling controls still require reviewer confirmation."
                 ),
                 evidence_refs=refs_for("security"),
@@ -351,12 +367,9 @@ class ScoringEngine:
         if insufficient:
             for dim in dims.values():
                 dim.score = round(max(10.0, dim.score - 8.0), 1)
-                if (
-                    "Insufficient verified document evidence"
-                    not in dim.missing_information
-                ):
+                if "Insufficient document evidence" not in dim.missing_information:
                     dim.missing_information.append(
-                        "Insufficient verified document evidence for a firm conclusion."
+                        "Insufficient document evidence for a firm conclusion."
                     )
                 dim.estimate_flags.append("insufficient_evidence_penalty")
 
@@ -405,7 +418,7 @@ class ScoringEngine:
 
     @classmethod
     def recompute_overall_from_assessment_fields(
-        cls, fields: Dict[str, float]
+        cls, fields: dict[str, float]
     ) -> float:
         return cls.weighted_overall(
             {k: float(fields.get(k, 0.0)) for k in DIMENSION_KEYS}
