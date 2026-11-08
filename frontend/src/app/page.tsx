@@ -12,6 +12,9 @@ import EnterprisePortfolio from "../components/workspace/EnterprisePortfolio";
 import AgencyEngagements from "../components/workspace/AgencyEngagements";
 import ProposalSowEditor from "../components/workspace/ProposalSowEditor";
 import ReviewApprovalPanel from "../components/workspace/ReviewApprovalPanel";
+import MemberAccessPanel, {
+  type WorkspaceMember,
+} from "../components/workspace/MemberAccessPanel";
 import type {
   EngagementItem,
   PortfolioItem,
@@ -252,8 +255,11 @@ export default function Home() {
   const [proposalSow, setProposalSow] = useState<ProposalSowPayload | null>(null);
   const [workspaceMessage, setWorkspaceMessage] = useState("");
   const [workspaceBusy, setWorkspaceBusy] = useState(false);
+  const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMember[]>([]);
+  const [memberMessage, setMemberMessage] = useState("");
+  const [memberBusy, setMemberBusy] = useState(false);
 
-  const [activeTab, setActiveTab] = useState("dashboard"); // dashboard, intake, upload, insights
+  const [activeTab, setActiveTab] = useState("dashboard"); // dashboard, members, intake, upload, insights
   const [insightsSubTab, setInsightsSubTab] = useState("summary"); // summary, bottlenecks, opportunity, matrix, scoring, risks, pilot, roadmap, export, commercial, investment
   const [activeArchLayer, setActiveArchLayer] = useState("systems");
   const [investmentPackage, setInvestmentPackage] = useState<InvestmentPackage | null>(null);
@@ -564,6 +570,74 @@ export default function Home() {
     }
   }, [getAuthHeaders]);
 
+  const loadWorkspaceMembers = useCallback(async (workspaceId: number) => {
+    try {
+      const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/members`, {
+        headers: getAuthHeaders(),
+      });
+      if (!res.ok) {
+        setWorkspaceMembers([]);
+        return;
+      }
+      setWorkspaceMembers(await res.json());
+    } catch (err) {
+      console.error(err);
+      setWorkspaceMembers([]);
+    }
+  }, [getAuthHeaders]);
+
+  const handleAddWorkspaceMember = async (payload: {
+    email: string;
+    role: string;
+    full_name?: string;
+    temporary_password?: string;
+    authorized_client_ids?: number[];
+  }) => {
+    if (!selectedWorkspace?.id) return;
+    setMemberBusy(true);
+    setMemberMessage("");
+    try {
+      const res = await fetch(`${API_BASE}/workspaces/${selectedWorkspace.id}/members`, {
+        method: "POST",
+        headers: getAuthHeaders(true),
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(await parseErrorMessage(res, "Could not add member"));
+      setMemberMessage(`Added ${payload.email} as ${payload.role}`);
+      await loadWorkspaceMembers(selectedWorkspace.id);
+    } catch (err) {
+      setMemberMessage(err instanceof Error ? err.message : "Could not add member");
+    } finally {
+      setMemberBusy(false);
+    }
+  };
+
+  const handleUpdateWorkspaceMember = async (
+    userId: number,
+    payload: { role: string; authorized_client_ids?: number[] | null }
+  ) => {
+    if (!selectedWorkspace?.id) return;
+    setMemberBusy(true);
+    setMemberMessage("");
+    try {
+      const res = await fetch(
+        `${API_BASE}/workspaces/${selectedWorkspace.id}/members/${userId}`,
+        {
+          method: "PUT",
+          headers: getAuthHeaders(true),
+          body: JSON.stringify(payload),
+        }
+      );
+      if (!res.ok) throw new Error(await parseErrorMessage(res, "Could not update member"));
+      setMemberMessage("Member access updated");
+      await loadWorkspaceMembers(selectedWorkspace.id);
+    } catch (err) {
+      setMemberMessage(err instanceof Error ? err.message : "Could not update member");
+    } finally {
+      setMemberBusy(false);
+    }
+  };
+
   const loadProposalSow = useCallback(async (assessmentId: number) => {
     try {
       const res = await fetch(`${API_BASE}/workspaces/assessments/${assessmentId}/proposal-sow`, {
@@ -666,8 +740,9 @@ export default function Home() {
   useEffect(() => {
     if (selectedWorkspace?.id) {
       loadWorkspaceViews(selectedWorkspace.id);
+      loadWorkspaceMembers(selectedWorkspace.id);
     }
-  }, [selectedWorkspace?.id, loadWorkspaceViews]);
+  }, [selectedWorkspace?.id, loadWorkspaceViews, loadWorkspaceMembers]);
 
   useEffect(() => {
     if (selectedAssessment?.id && insightsSubTab === "proposal") {
@@ -1505,6 +1580,12 @@ export default function Home() {
               {selectedWorkspace?.workspace_type === "enterprise" ? "Enterprise Console" : "Agency Console"}
             </button>
             <button 
+              onClick={() => setActiveTab("members")}
+              className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${activeTab === "members" ? "bg-blue-600 text-white" : "text-slate-400 hover:text-slate-200"}`}
+            >
+              Members & Access
+            </button>
+            <button 
               onClick={() => setActiveTab("intake")}
               className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${activeTab === "intake" ? "bg-blue-600 text-white" : "text-slate-400 hover:text-slate-200"}`}
             >
@@ -1801,6 +1882,19 @@ export default function Home() {
         )}
 
         {/* 2. CLIENT INTAKE SCREEN */}
+        {activeTab === "members" && selectedWorkspace && (
+          <MemberAccessPanel
+            members={workspaceMembers}
+            clients={clients.map((c) => ({ id: c.id, name: c.name }))}
+            canManage={["owner_admin"].includes(selectedWorkspace.role || "")}
+            busy={memberBusy}
+            message={memberMessage}
+            onRefresh={() => loadWorkspaceMembers(selectedWorkspace.id)}
+            onAddMember={handleAddWorkspaceMember}
+            onUpdateMember={handleUpdateWorkspaceMember}
+          />
+        )}
+
         {activeTab === "intake" && (
           <div className="glass-panel p-8 rounded-2xl max-w-3xl mx-auto relative">
             {/* Demo autofill floating overlay */}

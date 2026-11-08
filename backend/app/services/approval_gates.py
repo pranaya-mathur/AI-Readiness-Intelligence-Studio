@@ -43,6 +43,21 @@ def assert_assessment_approvable(ass: Assessment, *, target_status: str = "appro
     """Enforce prerequisites before assessment approval_status promotion."""
     if target_status not in {"reviewed", "approved"}:
         return
+    status = (ass.status or "").lower()
+    if status in {"incomplete", "failed", "intake", "uploading", "processing"}:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Cannot approve an assessment with status '{ass.status}'. "
+                "Complete analysis successfully first."
+            ),
+        )
+
+    # Internal "reviewed" is allowed on demo/heuristic runs; client-facing
+    # "approved" requires verified, non-demo analysis.
+    if target_status == "reviewed":
+        return
+
     exportable, reason = assessment_is_client_exportable(ass)
     analysis_mode = (getattr(ass, "analysis_mode", "") or "").lower()
     if not exportable and analysis_mode == "demo":
@@ -53,20 +68,12 @@ def assert_assessment_approvable(ass: Assessment, *, target_status: str = "appro
                 "client deliverables. Use internal demo export mode instead."
             ),
         )
-    if (ass.status or "").lower() in {"incomplete", "failed", "intake", "uploading", "processing"}:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"Cannot approve an assessment with status '{ass.status}'. "
-                "Complete analysis successfully first."
-            ),
-        )
     if (getattr(ass, "model_run_status", "") or "").lower() == "demo_simulated":
         raise HTTPException(
             status_code=409,
             detail="Simulated model output cannot be approved as verified analysis.",
         )
-    if target_status == "approved" and not exportable:
+    if not exportable:
         raise HTTPException(status_code=409, detail=reason or "Assessment is not approvable")
 
 
