@@ -109,6 +109,19 @@ class Assessment(Base):
     reviewer_notes = Column(Text, nullable=True)
     approval_status = Column(String, default="draft")  # draft, reviewed, approved
 
+    # Phase 1: scoring / model transparency (additive)
+    scoring_rubric_version = Column(String, nullable=True)
+    scoring_method = Column(String, nullable=True)
+    dimension_score_details = Column(JSON, nullable=True)
+    automation_potential_basis = Column(String, nullable=True)
+    analysis_mode = Column(String, nullable=True)  # real | demo
+    model_provider = Column(String, nullable=True)
+    model_name = Column(String, nullable=True)
+    model_run_status = Column(String, nullable=True)
+    model_error = Column(Text, nullable=True)
+    evidence_package = Column(JSON, nullable=True)
+    insufficient_evidence = Column(Integer, default=0)  # 0/1
+
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(
         DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow
@@ -213,6 +226,11 @@ class DocumentSignal(Base):
         String, nullable=False
     )  # SOP, Process, Tech Stack, Governance Gap
     description = Column(Text, nullable=False)
-    confidence = Column(Float, default=90.0)
+    confidence = Column(Float, default=0.0)  # uncalibrated; prefer evidence_tier
+    document_id = Column(String, nullable=True)
+    excerpt = Column(Text, nullable=True)
+    page_or_section = Column(String, nullable=True)
+    evidence_tier = Column(String, nullable=True)
+    evidence_id = Column(String, nullable=True)
 
     assessment = relationship("Assessment", back_populates="extracted_signals")

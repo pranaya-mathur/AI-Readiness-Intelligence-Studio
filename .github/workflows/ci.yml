@@ -66,6 +66,15 @@ jobs:
           # and backend.app.schemas.assessment as distinct modules
           MYPYPATH=. mypy --ignore-missing-imports --explicit-package-bases backend/app
 
+      - name: Execute Backend Unit Tests
+        working-directory: backend
+        env:
+          ENVIRONMENT: development
+          DEMO_MODE: "false"
+          ENABLE_DEMO_AUTH: "true"
+          PYTHONPATH: .
+        run: pytest -q tests
+
   # ----------------------------------------------------------------------------
   # JOB 2: FRONTEND QUALITY ASSURANCE & PRODUCTION BUILD
   # ----------------------------------------------------------------------------
@@ -160,6 +169,15 @@ jobs:
             ${{ runner.os }}-ollama-
 
       - name: Spin Up Docker Compose Network (Offline/Fallback Stack)
+        env:
+          USE_OLLAMA: "true"
+          ALLOW_OLLAMA_FALLBACK: "true"
+          DEMO_MODE: "false"
+          ALLOW_HEURISTIC_FALLBACK: "false"
+          ENABLE_DEMO_AUTH: "true"
+          ENABLE_DEMO_WORKSPACE: "true"
+          OLLAMA_REASONING_MODEL: phi3.5:latest
+          OLLAMA_STRUCTURED_MODEL: phi3.5:latest
         run: |
           docker compose build
           docker compose up -d

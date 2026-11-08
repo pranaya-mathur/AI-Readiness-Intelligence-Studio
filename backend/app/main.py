@@ -12,6 +12,13 @@ from app.api.assessment import router as assessment_router
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("AppMain")
 
+# Fail closed on insecure production configuration.
+try:
+    settings.validate_production_safety()
+except RuntimeError as safety_error:
+    logger.error(str(safety_error))
+    raise
+
 # 1. Automatically create database tables (SQLite fallback or PostgreSQL)
 try:
     logger.info("Initializing database schemas...")

@@ -406,10 +406,16 @@ export default function Home() {
         return;
       }
 
+      // Optional demo workspace seed — skipped when backend disables demo mode.
       const demoRes = await fetch(`${API_BASE}/assessments/demo`, {
         method: "POST",
         headers: getAuthHeaders(),
       });
+      if (demoRes.status === 403) {
+        setAssessments([]);
+        setSelectedAssessment(null);
+        return;
+      }
       if (!demoRes.ok) {
         throw new Error(await parseErrorMessage(demoRes, "Could not create demo assessment"));
       }
@@ -422,7 +428,8 @@ export default function Home() {
       setSelectedAssessment(demoData);
     } catch (e) {
       console.warn("Could not seed demo via backend: ", e);
-      // Fallback local UI mock data if backend offline
+      setAssessments([]);
+      setSelectedAssessment(null);
     } finally {
       setLoading(false);
     }

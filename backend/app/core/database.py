@@ -125,3 +125,39 @@ def ensure_runtime_schema():
                     "ALTER TABLE assessments ADD COLUMN approval_status VARCHAR DEFAULT 'draft'"
                 )
             )
+
+    phase1_assessment_columns = {
+        "scoring_rubric_version": "ALTER TABLE assessments ADD COLUMN scoring_rubric_version VARCHAR",
+        "scoring_method": "ALTER TABLE assessments ADD COLUMN scoring_method VARCHAR",
+        "dimension_score_details": "ALTER TABLE assessments ADD COLUMN dimension_score_details JSON",
+        "automation_potential_basis": "ALTER TABLE assessments ADD COLUMN automation_potential_basis VARCHAR",
+        "analysis_mode": "ALTER TABLE assessments ADD COLUMN analysis_mode VARCHAR",
+        "model_provider": "ALTER TABLE assessments ADD COLUMN model_provider VARCHAR",
+        "model_name": "ALTER TABLE assessments ADD COLUMN model_name VARCHAR",
+        "model_run_status": "ALTER TABLE assessments ADD COLUMN model_run_status VARCHAR",
+        "model_error": "ALTER TABLE assessments ADD COLUMN model_error TEXT",
+        "evidence_package": "ALTER TABLE assessments ADD COLUMN evidence_package JSON",
+        "insufficient_evidence": "ALTER TABLE assessments ADD COLUMN insufficient_evidence INTEGER DEFAULT 0",
+    }
+    for column_name, ddl in phase1_assessment_columns.items():
+        if column_name not in assessment_columns:
+            logger.info("Adding missing assessments.%s column...", column_name)
+            with engine.begin() as conn:
+                conn.execute(text(ddl))
+
+    if "document_signals" in inspector.get_table_names():
+        signal_columns = {
+            column["name"] for column in inspector.get_columns("document_signals")
+        }
+        phase1_signal_columns = {
+            "document_id": "ALTER TABLE document_signals ADD COLUMN document_id VARCHAR",
+            "excerpt": "ALTER TABLE document_signals ADD COLUMN excerpt TEXT",
+            "page_or_section": "ALTER TABLE document_signals ADD COLUMN page_or_section VARCHAR",
+            "evidence_tier": "ALTER TABLE document_signals ADD COLUMN evidence_tier VARCHAR",
+            "evidence_id": "ALTER TABLE document_signals ADD COLUMN evidence_id VARCHAR",
+        }
+        for column_name, ddl in phase1_signal_columns.items():
+            if column_name not in signal_columns:
+                logger.info("Adding missing document_signals.%s column...", column_name)
+                with engine.begin() as conn:
+                    conn.execute(text(ddl))

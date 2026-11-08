@@ -45,47 +45,32 @@ class DocumentGenerators:
             t = text.lower()
             return any(k in t for k in test_keywords)
 
-        # Clean company name of test markers to make it publication-grade
+        # Strip test markers from company name — never substitute Apex into real clients.
         comp_name = data.get("company_name") or ""
         if contains_test_marker(comp_name) or mode == "showcase":
             comp_name = re.sub(r"(?i)\s*-\s*e2e\s+test.*", "", comp_name)
             comp_name = re.sub(r"(?i)\s*e2e\s+test.*", "", comp_name)
             comp_name = re.sub(r"(?i)\s*overridden.*", "", comp_name)
             comp_name = comp_name.strip()
-            data["company_name"] = comp_name or "Apex Global Consulting Partners"
+            data["company_name"] = comp_name or "Client Organization"
 
-        # 1. Clean up key summary and pilot recommendation fields (Issue 1)
-        client_sum = data.get("client_summary") or ""
-        rec_pilot = data.get("recommended_first_pilot") or ""
-        why_pilot = data.get("why_recommended_pilot") or ""
-        exp_impact = data.get("expected_pilot_impact") or ""
-        rev_notes = data.get("reviewer_notes") or ""
-
-        has_markers = (
-            contains_test_marker(client_sum)
-            or contains_test_marker(rec_pilot)
-            or contains_test_marker(why_pilot)
-            or contains_test_marker(exp_impact)
-            or contains_test_marker(rev_notes)
-        )
-
-        if mode == "showcase" or has_markers:
-            data["client_summary"] = (
-                "Apex Global Consulting Partners shows strong potential for a controlled AI pilot focused on "
-                "pre-sales proposal acceleration, support triage, and governance-backed knowledge reuse. "
-                "The recommended first pilot is an Intelligent Pre-Sales Proposal Copilot because it targets "
-                "a high-value, document-heavy workflow with clear human review checkpoints."
-            )
-            data["recommended_first_pilot"] = "Intelligent Pre-Sales Proposal Copilot"
-            data["why_recommended_pilot"] = (
-                "The client has reusable proposal assets, repeated pre-sales drafting patterns, and clear "
-                "opportunities to improve response speed while preserving review control and compliance traceability."
-            )
-            data["expected_pilot_impact"] = (
-                "Directional improvement in first-draft proposal preparation time, improved approved-content reuse, "
-                "and stronger consistency across client-facing proposal outputs."
-            )
-            data["reviewer_notes"] = "Reviewed and approved for executive delivery."
+        # 1. Scrub test-marker contamination from summary/pilot fields without Apex rewrite.
+        for field in (
+            "client_summary",
+            "recommended_first_pilot",
+            "why_recommended_pilot",
+            "expected_pilot_impact",
+            "reviewer_notes",
+            "business_summary",
+            "readiness_interpretation",
+        ):
+            value = data.get(field) or ""
+            if contains_test_marker(value):
+                cleaned = re.sub(r"(?i)\s*e2e\s+test[^.]*\.?", "", value)
+                cleaned = re.sub(r"(?i)\s*overridden[^.]*\.?", "", cleaned)
+                cleaned = re.sub(r"(?i)programmatically[^.]*\.?", "", cleaned)
+                cleaned = " ".join(cleaned.split()).strip()
+                data[field] = cleaned or None
 
         # 2. Fix use case department normalization (Issue 2)
         def local_normalize(name: str, desc: str) -> str:
@@ -191,31 +176,26 @@ class DocumentGenerators:
     @staticmethod
     def get_client_facing_evidence(source_file: str, original_description: str) -> str:
         """
-        Transforms technical document parsing messages into clean, insightful findings.
+        Present evidence descriptions without fabricating Apex-specific findings.
         """
         name = (source_file or "").strip()
         desc = (original_description or "").strip()
 
-        if (
-            "successfully extracted text" in desc.lower()
-            or "all 9 nodes" in desc.lower()
-            or len(desc) < 15
-        ):
-            if "Apex_Client_Brief" in name:
-                return "Identified client goals around proposal acceleration, support triage, billing workflow improvement, and governance readiness."
-            elif "Apex_AI_Governance_Checklist" in name:
-                return "Identified governance controls around human review, audit logs, access control, and compliance validation."
-            elif "Apex_Sales_Playbook" in name:
-                return "Identified reusable proposal assets, pre-sales workflow dependencies, and approved content reuse opportunities."
-            elif "Apex_Support_Triage" in name:
-                return "Identified repeated support classification, routing, and response drafting patterns."
-            elif "Apex_Operations_Billing" in name:
-                return "Identified manual billing reconciliation steps involving spreadsheets and recurring operational handoffs."
-            elif "LangGraphOrchestrator" in name:
-                return "Confirmed successful completion of the stateful multi-agent assessment pipeline."
+        if "LangGraphOrchestrator" in name:
+            return sanitize_text(
+                desc,
+                "Assessment pipeline execution status recorded.",
+            )
+
+        if "successfully extracted text" in desc.lower() or len(desc) < 15:
+            return (
+                f"Parsed document '{name or 'uploaded file'}' for evidence extraction. "
+                "No client-facing finding text was available beyond parse metadata."
+            )
 
         return sanitize_text(
-            original_description, "Confirmed parsed client document insights."
+            original_description,
+            "Document evidence recorded without additional inference.",
         )
 
     @staticmethod
@@ -223,25 +203,46 @@ class DocumentGenerators:
         phase: str, original_action: str, original_impact: str
     ) -> tuple[str, str]:
         """
-        Cleans up raw intake dumps and maps phases to structured advisory actions and impacts.
+        Prefer the assessment's own roadmap text. Only replace prompt-leak / empty content.
+        Never inject Apex-specific Proposal Copilot language into unrelated clients.
         """
-        p = (phase or "").strip()
-
-        if "30-Day" in p:
-            action = "Finalize pilot scope, success metrics, required proposal assets, and MVP architecture for the Intelligent Pre-Sales Proposal Copilot."
-            impact = "Creates a validated pilot foundation with measurable success criteria and cleaner evidence inputs."
-        elif "60-Day" in p:
-            action = "Run a controlled MVP with human review enabled across Sales & Pre-sales and Customer Support workflows."
-            impact = "Reduces repetitive turnaround time while preserving trust, review checkpoints, and source traceability."
-        elif "90-Day" in p:
-            action = "Expand governance, adoption training, and executive reporting so the pilot can become a repeatable consulting offer."
-            impact = "Turns the pilot into a reusable operating model with stronger controls and internal buy-in."
-        else:
-            action = sanitize_text(original_action, "Scoped pilot deployment steps.")
-            impact = sanitize_text(
-                original_impact, "Reduces turnaround times and manual efforts."
-            )
-
+        action = sanitize_text(original_action, "")
+        impact = sanitize_text(original_impact, "")
+        leak_markers = (
+            "format your response",
+            "format in json",
+            "containing 3 strategic steps",
+            "suggest 2",
+            "suggest 3",
+        )
+        action_l = (action or "").lower()
+        if not action or any(m in action_l for m in leak_markers):
+            p = (phase or "").strip()
+            if "30-Day" in p:
+                action = "Finalize pilot scope, success metrics, required evidence inputs, and MVP architecture."
+                impact = (
+                    impact
+                    or "Creates a validated pilot foundation with measurable success criteria."
+                )
+            elif "60-Day" in p:
+                action = "Run a controlled MVP with human review enabled across priority workflows."
+                impact = (
+                    impact
+                    or "Reduces repetitive turnaround time while preserving review checkpoints."
+                )
+            elif "90-Day" in p:
+                action = "Expand governance, adoption training, and executive reporting for a repeatable operating model."
+                impact = (
+                    impact
+                    or "Turns the pilot into a reusable model with stronger controls."
+                )
+            else:
+                action = "Scoped pilot deployment steps."
+                impact = (
+                    impact or "Estimate only — impact depends on verified evidence."
+                )
+        if not impact:
+            impact = "Estimate only — not supported by measured data unless noted."
         return action, impact
 
     @staticmethod
@@ -274,8 +275,7 @@ class DocumentGenerators:
         )
 
         recommended_pilot = (
-            assessment.get("recommended_first_pilot")
-            or "Intelligent Pre-Sales Proposal Copilot"
+            assessment.get("recommended_first_pilot") or "Scoped evidence-backed pilot"
         )
         compliance_requirements = assessment.get("compliance_requirements") or []
         current_tools = assessment.get("current_tools") or []

@@ -1,33 +1,37 @@
 import io
 import logging
+import os
+from typing import List, Optional
+
 import fitz  # PyMuPDF for quick PDF parses
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from docx import Document as DocxDocument
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from typing import List, Optional
-from docx import Document as DocxDocument
 
+from app.agents.graph import AssessmentOrchestrator
+from app.api.auth import get_current_user
+from app.api.clients import get_client_for_user, get_or_create_default_organization
+from app.core.config import settings
 from app.core.database import get_db
+from app.core.sanitizer import sanitize_text
 from app.models import (
+    AIUseCase,
     Assessment,
     Client,
+    DocumentSignal,
     ProcessBottleneck,
-    AIUseCase,
     RiskRegister,
     RoadmapItem,
-    DocumentSignal,
     User,
 )
 from app.schemas.assessment import (
     AssessmentCreate,
-    AssessmentUpdate,
     AssessmentResponse,
+    AssessmentUpdate,
 )
-from app.agents.graph import AssessmentOrchestrator
 from app.services.document_generators import DocumentGenerators
-from app.api.auth import get_current_user
-from app.api.clients import get_client_for_user, get_or_create_default_organization
-from app.core.sanitizer import sanitize_text
+from app.services.scoring import ScoringEngine
 
 
 logger = logging.getLogger("AssessmentAPI")
@@ -164,9 +168,25 @@ def _db_assessment_to_dict(ass: Assessment) -> dict:
                 "signal_type": s.signal_type,
                 "description": s.description,
                 "confidence": s.confidence,
+                "document_id": getattr(s, "document_id", None),
+                "excerpt": getattr(s, "excerpt", None),
+                "page_or_section": getattr(s, "page_or_section", None),
+                "evidence_tier": getattr(s, "evidence_tier", None),
+                "evidence_id": getattr(s, "evidence_id", None),
             }
             for s in ass.extracted_signals
         ],
+        "scoring_rubric_version": getattr(ass, "scoring_rubric_version", None),
+        "scoring_method": getattr(ass, "scoring_method", None),
+        "dimension_score_details": getattr(ass, "dimension_score_details", None),
+        "automation_potential_basis": getattr(ass, "automation_potential_basis", None),
+        "analysis_mode": getattr(ass, "analysis_mode", None),
+        "model_provider": getattr(ass, "model_provider", None),
+        "model_name": getattr(ass, "model_name", None),
+        "model_run_status": getattr(ass, "model_run_status", None),
+        "model_error": getattr(ass, "model_error", None),
+        "evidence_package": getattr(ass, "evidence_package", None),
+        "insufficient_evidence": getattr(ass, "insufficient_evidence", 0),
     }
 
 
@@ -277,6 +297,63 @@ def get_assessment(
     return ass
 
 
+def _validate_upload_file(upload: UploadFile, content: bytes) -> None:
+    filename = upload.filename or "upload.bin"
+    _, ext = os.path.splitext(filename.lower())
+    if ext not in settings.allowed_upload_extensions:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Unsupported file type '{ext}'. Allowed: "
+                f"{', '.join(settings.allowed_upload_extensions)}"
+            ),
+        )
+    if len(content) > settings.MAX_UPLOAD_FILE_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"File '{filename}' exceeds max size of "
+                f"{settings.MAX_UPLOAD_FILE_BYTES} bytes"
+            ),
+        )
+
+
+def _parse_upload_bytes(
+    filename: str, content: bytes
+) -> tuple[str, list, Optional[str]]:
+    """Returns (text, pages, parse_error)."""
+    pages: list = []
+    try:
+        lower = filename.lower()
+        if lower.endswith(".pdf"):
+            doc = fitz.open(stream=content, filetype="pdf")
+            chunks: list[str] = []
+            for idx, page in enumerate(doc, start=1):
+                page_text = page.get_text() or ""
+                pages.append({"page": idx, "text": page_text})
+                chunks.append(page_text)
+            return "\n".join(chunks), pages, None
+        if lower.endswith(".docx"):
+            doc = DocxDocument(io.BytesIO(content))
+            paragraph_text = [
+                paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip()
+            ]
+            table_text = []
+            for table in doc.tables:
+                for row in table.rows:
+                    cells = [
+                        cell.text.strip() for cell in row.cells if cell.text.strip()
+                    ]
+                    if cells:
+                        table_text.append(" | ".join(cells))
+            text = "\n".join(paragraph_text + table_text)
+            return text, [{"page": 1, "text": text}], None
+        text = content.decode("utf-8", errors="ignore")
+        return text, [{"page": 1, "text": text}], None
+    except Exception as exc:
+        return "", [], str(exc)
+
+
 @router.post("/{id}/upload", response_model=AssessmentResponse)
 def upload_documents(
     id: int,
@@ -284,7 +361,7 @@ def upload_documents(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Parses uploaded files, populates text corpus, and executes the LangGraph analysis"""
+    """Parses uploaded files, populates evidence corpus, and executes the LangGraph analysis"""
     ass = (
         db.query(Assessment)
         .filter(Assessment.id == id, Assessment.user_id == current_user.id)
@@ -293,70 +370,44 @@ def upload_documents(
     if not ass:
         raise HTTPException(status_code=404, detail="Assessment not found")
 
+    if len(files) > settings.MAX_UPLOAD_FILES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Too many files. Max allowed is {settings.MAX_UPLOAD_FILES}.",
+        )
+
     ass.status = "processing"
     db.commit()
 
+    documents = []
     extracted_corpus = []
-    signals_to_create = []
 
-    # 1. Parse uploaded files (using PyMuPDF for PDFs, fallback to utf-8 text)
     for f in files:
-        file_text = ""
+        content = f.file.read()
+        filename = f.filename or "upload.bin"
         try:
-            content = f.file.read()
-            if f.filename and f.filename.endswith(".pdf"):
-                logger.info(f"Parsing PDF file: {f.filename}")
-                doc = fitz.open(stream=content, filetype="pdf")
-                for page in doc:
-                    file_text += page.get_text()
-            elif f.filename and f.filename.endswith(".docx"):
-                logger.info(f"Parsing DOCX file: {f.filename}")
-                doc = DocxDocument(io.BytesIO(content))
-                paragraph_text = [
-                    paragraph.text
-                    for paragraph in doc.paragraphs
-                    if paragraph.text.strip()
-                ]
-                table_text = []
-                for table in doc.tables:
-                    for row in table.rows:
-                        cells = [
-                            cell.text.strip() for cell in row.cells if cell.text.strip()
-                        ]
-                        if cells:
-                            table_text.append(" | ".join(cells))
-                file_text = "\n".join(paragraph_text + table_text)
-            else:
-                logger.info(f"Parsing text/raw file: {f.filename}")
-                file_text = content.decode("utf-8", errors="ignore")
+            _validate_upload_file(f, content)
+        except HTTPException:
+            ass.status = "failed"
+            db.commit()
+            raise
 
-            extracted_corpus.append(f"--- File: {f.filename} ---\n{file_text}")
-            signals_to_create.append(
-                DocumentSignal(
-                    source_file=f.filename,
-                    signal_type="Document Upload",
-                    description=f"Successfully extracted text length: {len(file_text)} characters.",
-                    confidence=95.0,
-                )
-            )
-        except Exception as e:
-            logger.error(f"Error parsing file {f.filename}: {e}")
-            signals_to_create.append(
-                DocumentSignal(
-                    source_file=f.filename,
-                    signal_type="Parsing Warning",
-                    description=f"File parsed with errors: {str(e)}",
-                    confidence=40.0,
-                )
-            )
+        file_text, pages, parse_error = _parse_upload_bytes(filename, content)
+        documents.append(
+            {
+                "filename": filename,
+                "text": file_text,
+                "pages": pages,
+                "parse_error": parse_error,
+            }
+        )
+        if parse_error:
+            logger.error("Error parsing file %s: %s", filename, parse_error)
+        else:
+            extracted_corpus.append(f"--- File: {filename} ---\n{file_text}")
 
     consolidated_text = "\n\n".join(extracted_corpus)
 
-    # Save parsed text and signals
-    ass.extracted_signals.extend(signals_to_create)
-    db.commit()
-
-    # 2. Run LangGraph Multi-Agent Pipeline
     initial_graph_state = {
         "assessment_id": ass.id,
         "company_name": ass.company_name,
@@ -370,6 +421,8 @@ def upload_documents(
         "pain_points": ass.pain_points or [],
         "ai_goals": ass.ai_goals or [],
         "extracted_text": consolidated_text,
+        "documents": documents,
+        "analysis_mode": "demo" if settings.DEMO_MODE else "real",
     }
 
     try:
@@ -377,85 +430,122 @@ def upload_documents(
             initial_graph_state, thread_id=f"thread_{ass.id}"
         )
 
-        # 3. Synchronize Graph state outputs to Database models
+        incomplete = bool(final_state.get("analysis_incomplete"))
         ass.business_summary = sanitize_text(
             final_state.get("business_summary"),
-            "Strategic review of core manual workflows, data systems, and compliance requirements.",
+            "Insufficient verified evidence for a complete business summary.",
         )
         ass.client_summary = sanitize_text(
             final_state.get("business_summary"),
-            "Strategic review of core manual workflows, data systems, and compliance requirements.",
+            "Insufficient verified evidence for a complete client summary.",
         )
         ass.approval_status = "draft"
-        ass.overall_score = final_state.get("overall_score", 0.0)
-        ass.automation_potential = final_state.get("automation_potential", 0.0)
-        ass.confidence_score = final_state.get("recommended_pilot", {}).get(
-            "confidence", 85.0
+        ass.overall_score = float(final_state.get("overall_score", 0.0) or 0.0)
+        ass.automation_potential = float(
+            final_state.get("automation_potential", 0.0) or 0.0
         )
+        # Confidence is uncalibrated; do not present LLM percentages as certainty.
+        ass.confidence_score = 0.0
         ass.readiness_interpretation = sanitize_text(
             final_state.get("readiness_interpretation"),
-            "The client shows a strong business alignment score, with moderate integration and governance scores that can be resolved via an operational pilot.",
+            "Insufficient verified evidence for a firm readiness interpretation.",
         )
 
-        # Score breakdown
-        ass.data_readiness = final_state.get("data_readiness", 0.0)
+        ass.data_readiness = float(final_state.get("data_readiness", 0.0) or 0.0)
         ass.data_justification = sanitize_text(
             final_state.get("data_justification"),
-            "The available data landscape appears mixed, with meaningful business information present but not yet fully standardized for AI use.",
+            "Missing verified data evidence.",
         )
-        ass.process_readiness = final_state.get("process_readiness", 0.0)
+        ass.process_readiness = float(final_state.get("process_readiness", 0.0) or 0.0)
         ass.process_justification = sanitize_text(
             final_state.get("process_justification"),
-            "Core workflows are repetitive enough for AI support, but they still need tighter standardization before large-scale automation.",
+            "Missing verified process evidence.",
         )
-        ass.integration_readiness = final_state.get("integration_readiness", 0.0)
+        ass.integration_readiness = float(
+            final_state.get("integration_readiness", 0.0) or 0.0
+        )
         ass.integration_justification = sanitize_text(
             final_state.get("integration_justification"),
-            "Current systems can support integration work, but shared middleware and clean workflow handoffs still need to be established.",
+            "Missing verified integration evidence.",
         )
-        ass.governance_readiness = final_state.get("governance_readiness", 0.0)
+        ass.governance_readiness = float(
+            final_state.get("governance_readiness", 0.0) or 0.0
+        )
         ass.governance_justification = sanitize_text(
             final_state.get("governance_justification"),
-            "Governance requirements are visible, but AI-specific approval controls and auditability need to be strengthened.",
+            "Missing verified governance evidence.",
         )
-        ass.security_readiness = final_state.get("security_readiness", 0.0)
+        ass.security_readiness = float(
+            final_state.get("security_readiness", 0.0) or 0.0
+        )
         ass.security_justification = sanitize_text(
             final_state.get("security_justification"),
-            "Baseline enterprise security controls appear present, though AI-specific data protections still require operational enforcement.",
+            "Missing verified security evidence.",
         )
-        ass.team_readiness = final_state.get("team_readiness", 0.0)
+        ass.team_readiness = float(final_state.get("team_readiness", 0.0) or 0.0)
         ass.team_justification = sanitize_text(
             final_state.get("team_justification"),
-            "Leadership interest is present, but adoption readiness still depends on training, operating ownership, and change management discipline.",
+            "Missing verified team readiness evidence.",
         )
-        ass.business_alignment = final_state.get("business_alignment", 0.0)
+        ass.business_alignment = float(
+            final_state.get("business_alignment", 0.0) or 0.0
+        )
         ass.alignment_justification = sanitize_text(
             final_state.get("alignment_justification"),
-            "The most promising AI use cases are well aligned with measurable business goals such as faster delivery and lower manual effort.",
+            "Missing verified business alignment evidence.",
         )
 
-        # Risk assessment
+        # Always recompute overall deterministically from persisted dimension scores.
+        ass.overall_score = ScoringEngine.recompute_overall_from_assessment_fields(
+            {
+                "data_readiness": ass.data_readiness,
+                "process_readiness": ass.process_readiness,
+                "integration_readiness": ass.integration_readiness,
+                "governance_readiness": ass.governance_readiness,
+                "security_readiness": ass.security_readiness,
+                "team_readiness": ass.team_readiness,
+                "business_alignment": ass.business_alignment,
+            }
+        )
+
+        ass.scoring_rubric_version = final_state.get("scoring_rubric_version")
+        ass.scoring_method = final_state.get("scoring_method")
+        ass.dimension_score_details = final_state.get("dimension_score_details")
+        ass.automation_potential_basis = final_state.get("automation_potential_basis")
+        ass.analysis_mode = final_state.get("analysis_mode") or (
+            "demo" if settings.DEMO_MODE else "real"
+        )
+        ass.model_provider = final_state.get("model_provider")
+        ass.model_name = final_state.get("model_name")
+        ass.model_run_status = final_state.get("model_run_status")
+        ass.model_error = final_state.get("model_error") or final_state.get(
+            "incomplete_reason"
+        )
+        ass.evidence_package = final_state.get("evidence_package")
+        ass.insufficient_evidence = 1 if final_state.get("insufficient_evidence") else 0
+
         ass.risk_level = (
             "High"
             if any(r.get("severity") == "High" for r in final_state.get("risks", []))
             else "Medium"
         )
 
-        # Recommended Pilot
-        pilot = final_state.get("recommended_pilot", {})
+        pilot = final_state.get("recommended_pilot", {}) or {}
         ass.recommended_first_pilot = sanitize_text(
-            pilot.get("name"), "Intelligent Pre-Sales Proposal Copilot"
+            pilot.get("name"),
+            "Evidence Completion Sprint"
+            if final_state.get("insufficient_evidence")
+            else "Pilot recommendation unavailable",
         )
         ass.why_recommended_pilot = sanitize_text(
             pilot.get("why"),
-            "High transformation value, low implementation complexity, and matches observed pre-sales bottlenecks.",
+            "Insufficient verified evidence for a firm pilot recommendation.",
         )
         ass.expected_pilot_impact = sanitize_text(
             pilot.get("expected_impact"),
-            "Reduces first-draft proposal preparation time, improves approved content reuse, and creates a controlled review flow for client-ready documents.",
+            "Impact is an estimate only and is not supported by measured data.",
         )
 
-        # Map Bottlenecks
         db.query(ProcessBottleneck).filter(
             ProcessBottleneck.assessment_id == ass.id
         ).delete()
@@ -463,27 +553,26 @@ def upload_documents(
             db.add(
                 ProcessBottleneck(
                     assessment_id=ass.id,
-                    department=b.get("department", "Operations"),
+                    department=b.get("department", "Unknown"),
                     process_name=sanitize_text(
-                        b.get("process_name"), "Manual Operational Process"
+                        b.get("process_name"), "Insufficient Evidence"
                     ),
                     bottleneck_description=sanitize_text(
                         b.get("bottleneck_description"),
-                        "Manual collation and copy-paste processes limit operational velocity.",
+                        "Insufficient verified evidence to describe this bottleneck.",
                     ),
-                    ai_potential=b.get("ai_potential", "Medium"),
+                    ai_potential=b.get("ai_potential", "Unknown"),
                 )
             )
 
-        # Map Use Cases
         db.query(AIUseCase).filter(AIUseCase.assessment_id == ass.id).delete()
         for u in final_state.get("use_cases", []):
             uc_name = sanitize_text(
-                u.get("use_case_name"), "Intelligent Operational Copilot"
+                u.get("use_case_name"), "Insufficient Evidence — Discovery Deferred"
             )
             uc_desc = sanitize_text(
                 u.get("description"),
-                "AI decision support and semantic retrieval tool to streamline manual workflows.",
+                "Use-case discovery incomplete due to missing verified evidence.",
             )
             db.add(
                 AIUseCase(
@@ -491,37 +580,37 @@ def upload_documents(
                     department=normalize_department(uc_name, uc_desc),
                     use_case_name=uc_name,
                     description=uc_desc,
-                    value=u.get("value", "High"),
-                    complexity=u.get("complexity", "Medium"),
-                    risk=u.get("risk", "Low"),
-                    priority=u.get("priority", "P1"),
+                    value=u.get("value", "Unknown"),
+                    complexity=u.get("complexity", "Unknown"),
+                    risk=u.get("risk", "Unknown"),
+                    priority=u.get("priority", "P3"),
                     evidence=sanitize_text(
                         u.get("evidence"),
-                        "Manual processing and multi-system copy-pasting loops observed in standard operations.",
+                        "Insufficient verified evidence.",
                     ),
-                    confidence=u.get("confidence", 85.0),
+                    confidence=0.0,
                 )
             )
 
-        # Map Risks
         db.query(RiskRegister).filter(RiskRegister.assessment_id == ass.id).delete()
         for r in final_state.get("risks", []):
             db.add(
                 RiskRegister(
                     assessment_id=ass.id,
                     risk_name=sanitize_text(
-                        r.get("risk_name"), "AI Implementation Risk"
+                        r.get("risk_name"), "Insufficient Evidence for Risk Closure"
                     ),
-                    severity=r.get("severity", "Medium"),
+                    severity=r.get("severity", "High"),
                     recommendation=sanitize_text(
                         r.get("recommendation"),
-                        "Apply human review, source logging, redaction controls, and evaluation baselines before AI outputs are shared externally.",
+                        "Collect verified governance/security evidence before external model use.",
                     ),
-                    is_control_met=r.get("is_control_met", 0),
+                    is_control_met=0
+                    if r.get("evidence_tier") != "verified"
+                    else int(r.get("is_control_met", 0) or 0),
                 )
             )
 
-        # Map Roadmap Items
         db.query(RoadmapItem).filter(RoadmapItem.assessment_id == ass.id).delete()
         for item in final_state.get("roadmap_items", []):
             db.add(
@@ -530,34 +619,76 @@ def upload_documents(
                     phase=item.get("phase", "30-Day"),
                     action_item=sanitize_text(
                         item.get("action_item"),
-                        "Finalize pilot scope, confirm success metrics, map required documents, and prepare controlled MVP delivery plan.",
+                        "Collect missing evidence before pilot build.",
                     ),
                     expected_impact=sanitize_text(
                         item.get("expected_impact"),
-                        "Creates a validated pilot foundation with measurable success criteria.",
+                        "Estimate only — not supported by measured data.",
                     ),
-                    confidence=item.get("confidence", 80.0),
+                    confidence=0.0,
                 )
             )
 
-        # Add a parsed document signal indicating LangGraph success
+        # Replace prior upload/analysis signals with provenance-rich evidence rows.
+        db.query(DocumentSignal).filter(DocumentSignal.assessment_id == ass.id).delete()
+        for signal in final_state.get("extracted_signals", []):
+            db.add(
+                DocumentSignal(
+                    assessment_id=ass.id,
+                    source_file=signal.get("source_file") or "unknown",
+                    signal_type=signal.get("signal_type") or "Evidence",
+                    description=sanitize_text(
+                        signal.get("description"), "Evidence item"
+                    ),
+                    confidence=0.0,
+                    document_id=signal.get("document_id"),
+                    excerpt=signal.get("excerpt"),
+                    page_or_section=signal.get("page_or_section"),
+                    evidence_tier=signal.get("evidence_tier"),
+                    evidence_id=signal.get("evidence_id"),
+                )
+            )
+
         db.add(
             DocumentSignal(
                 assessment_id=ass.id,
                 source_file="LangGraphOrchestrator",
-                signal_type="Execution Complete",
-                description="All 9 nodes of the stateful analysis graph executed successfully.",
-                confidence=100.0,
+                signal_type="Execution Incomplete"
+                if incomplete
+                else "Execution Complete",
+                description=(
+                    final_state.get("incomplete_reason")
+                    or (
+                        f"Pipeline finished. provider={ass.model_provider} "
+                        f"model={ass.model_name} status={ass.model_run_status} "
+                        f"mode={ass.analysis_mode}"
+                    )
+                ),
+                confidence=0.0,
+                evidence_tier="missing" if incomplete else "verified",
             )
         )
 
-        ass.status = "completed"
+        ass.status = "incomplete" if incomplete else "completed"
         db.commit()
         db.refresh(ass)
 
+        if incomplete and not settings.DEMO_MODE:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Verified model analysis could not complete: "
+                    f"{final_state.get('incomplete_reason') or ass.model_error}"
+                ),
+            )
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"LangGraph execution crashed: {e}")
         ass.status = "failed"
+        ass.model_run_status = "failed"
+        ass.model_error = str(e)
         db.add(
             DocumentSignal(
                 assessment_id=ass.id,
@@ -565,6 +696,7 @@ def upload_documents(
                 signal_type="Execution Failure",
                 description=f"Pipeline crashed with message: {str(e)}",
                 confidence=0.0,
+                evidence_tier="missing",
             )
         )
         db.commit()
@@ -684,6 +816,33 @@ def update_assessment(
                 )
             )
 
+    # Deterministic overall from dimension scores (never trust an arbitrary LLM overall).
+    dimension_keys = {
+        "data_readiness",
+        "process_readiness",
+        "integration_readiness",
+        "governance_readiness",
+        "security_readiness",
+        "team_readiness",
+        "business_alignment",
+    }
+    if (
+        dimension_keys.intersection(update_data.keys())
+        or "overall_score" in update_data
+    ):
+        ass.overall_score = ScoringEngine.recompute_overall_from_assessment_fields(
+            {
+                "data_readiness": ass.data_readiness or 0.0,
+                "process_readiness": ass.process_readiness or 0.0,
+                "integration_readiness": ass.integration_readiness or 0.0,
+                "governance_readiness": ass.governance_readiness or 0.0,
+                "security_readiness": ass.security_readiness or 0.0,
+                "team_readiness": ass.team_readiness or 0.0,
+                "business_alignment": ass.business_alignment or 0.0,
+            }
+        )
+        ass.scoring_method = "deterministic_rubric_v1_human_reviewed"
+
     # Re-calculate readiness interpretation dynamically on manual score changes
     if "readiness_interpretation" not in update_data:
         prefix = "With a consultant-reviewed AI readiness score of"
@@ -765,6 +924,11 @@ def create_walkthrough_workspace(
     current_user: User = Depends(get_current_user),
 ):
     """Auto-fills a complete, premium assessment with walkthrough client workspace data"""
+    if not settings.ENABLE_DEMO_WORKSPACE:
+        raise HTTPException(
+            status_code=403,
+            detail="Demo workspace seeding is disabled in this environment",
+        )
     logger.info("Initializing Walkthrough Sample Workspace...")
     organization = get_or_create_default_organization(db, current_user)
     sample_client = (

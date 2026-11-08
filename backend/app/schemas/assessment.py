@@ -116,7 +116,12 @@ class SignalBase(BaseModel):
     source_file: str
     signal_type: str
     description: str
-    confidence: float = 90.0
+    confidence: float = 0.0
+    document_id: Optional[str] = None
+    excerpt: Optional[str] = None
+    page_or_section: Optional[str] = None
+    evidence_tier: Optional[str] = None
+    evidence_id: Optional[str] = None
 
 
 class SignalResponse(SignalBase):
@@ -251,6 +256,18 @@ class AssessmentResponse(BaseModel):
     client_summary: Optional[str]
     reviewer_notes: Optional[str]
     approval_status: Optional[str]
+
+    scoring_rubric_version: Optional[str] = None
+    scoring_method: Optional[str] = None
+    dimension_score_details: Optional[dict] = None
+    automation_potential_basis: Optional[str] = None
+    analysis_mode: Optional[str] = None
+    model_provider: Optional[str] = None
+    model_name: Optional[str] = None
+    model_run_status: Optional[str] = None
+    model_error: Optional[str] = None
+    evidence_package: Optional[dict] = None
+    insufficient_evidence: Optional[int] = 0
 
     created_at: datetime
     updated_at: datetime

@@ -1,4 +1,5 @@
-from typing import List, Dict, Any
+from typing import Any, Dict, List, Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -16,56 +17,61 @@ class AssessmentState(BaseModel):
     pain_points: List[str] = Field(default_factory=list)
     ai_goals: List[str] = Field(default_factory=list)
 
-    # Document Signals
-    extracted_text: str = ""  # Consolidated text corpus from uploaded SOPs/files
-    extracted_signals: List[Dict[str, Any]] = Field(
-        default_factory=list
-    )  # Dicts with source_file, signal_type, description, confidence
+    # Document Signals / Evidence
+    extracted_text: str = ""  # Consolidated text corpus (bounded)
+    documents: List[Dict[str, Any]] = Field(default_factory=list)
+    evidence_package: Dict[str, Any] = Field(default_factory=dict)
+    extracted_signals: List[Dict[str, Any]] = Field(default_factory=list)
+    insufficient_evidence: bool = False
 
     # Analysis & Insights
     business_summary: str = ""
-    bottlenecks: List[Dict[str, Any]] = Field(
-        default_factory=list
-    )  # Dicts with process_name, department, bottleneck_description, ai_potential
-    use_cases: List[Dict[str, Any]] = Field(
-        default_factory=list
-    )  # Dicts with use_case_name, department, description, value, complexity, risk, priority, evidence, confidence
+    bottlenecks: List[Dict[str, Any]] = Field(default_factory=list)
+    use_cases: List[Dict[str, Any]] = Field(default_factory=list)
 
     # Scores
     data_readiness: float = 0.0
-    data_justification: str | None = None
+    data_justification: Optional[str] = None
     process_readiness: float = 0.0
-    process_justification: str | None = None
+    process_justification: Optional[str] = None
     integration_readiness: float = 0.0
-    integration_justification: str | None = None
+    integration_justification: Optional[str] = None
     governance_readiness: float = 0.0
-    governance_justification: str | None = None
+    governance_justification: Optional[str] = None
     security_readiness: float = 0.0
-    security_justification: str | None = None
+    security_justification: Optional[str] = None
     team_readiness: float = 0.0
-    team_justification: str | None = None
+    team_justification: Optional[str] = None
     business_alignment: float = 0.0
-    alignment_justification: str | None = None
+    alignment_justification: Optional[str] = None
     overall_score: float = 0.0
     automation_potential: float = 0.0
     readiness_interpretation: str = ""
+    scoring_rubric_version: str = ""
+    scoring_method: str = ""
+    dimension_score_details: Dict[str, Any] = Field(default_factory=dict)
+    automation_potential_basis: str = ""
 
     # Governance & Risks
-    risks: List[Dict[str, Any]] = Field(
-        default_factory=list
-    )  # Dicts with risk_name, severity, recommendation, is_control_met
+    risks: List[Dict[str, Any]] = Field(default_factory=list)
 
     # Pilot & Strategy
-    recommended_pilot: Dict[str, Any] = Field(
-        default_factory=dict
-    )  # keys: name, why, expected_impact, confidence
+    recommended_pilot: Dict[str, Any] = Field(default_factory=dict)
 
     # Roadmap & Outputs
-    roadmap_items: List[Dict[str, Any]] = Field(
-        default_factory=list
-    )  # Dicts with phase, action_item, expected_impact, confidence
+    roadmap_items: List[Dict[str, Any]] = Field(default_factory=list)
     proposal_summary: Dict[str, Any] = Field(default_factory=dict)
+
+    # Model execution transparency
+    analysis_mode: str = "real"  # real | demo
+    model_provider: str = "none"
+    model_name: str = "none"
+    model_run_status: str = "not_started"
+    model_error: Optional[str] = None
+    model_run_history: List[Dict[str, Any]] = Field(default_factory=list)
 
     # Orchestration logs / progress trackers
     logs: List[str] = Field(default_factory=list)
     current_node: str = "init"
+    analysis_incomplete: bool = False
+    incomplete_reason: Optional[str] = None

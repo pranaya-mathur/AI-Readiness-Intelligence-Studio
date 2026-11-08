@@ -86,9 +86,12 @@ def login(
     # Standard email login
     user = db.query(User).filter(User.email == form_data.username).first()
 
-    # Walkthrough Workspace Credentials
-    if form_data.username == "demo@studio.com" and form_data.password == "password123":
-        # Check if user exists, else seed it
+    # Walkthrough credentials — development / explicitly enabled only.
+    if (
+        settings.ENABLE_DEMO_AUTH
+        and form_data.username == "demo@studio.com"
+        and form_data.password == "password123"
+    ):
         if not user:
             user = User(
                 email="demo@studio.com",
@@ -97,6 +100,12 @@ def login(
             db.add(user)
             db.commit()
             db.refresh(user)
+    elif form_data.username == "demo@studio.com" and not settings.ENABLE_DEMO_AUTH:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Demo credentials are disabled in this environment",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
     if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(

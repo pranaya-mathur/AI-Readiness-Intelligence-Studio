@@ -1,75 +1,217 @@
 import json
 import logging
-from typing import Dict, Any
+from typing import Any, Dict, List, Optional
+
 from app.agents.state import AssessmentState
-from app.services.llm_router import LLMRouter
+from app.core.config import settings
+from app.services.evidence import EvidenceExtractor
+from app.services.llm_router import LLMExecutionError, LLMRouter
+from app.services.scoring import ScoringEngine
 
 logger = logging.getLogger("AgentNodes")
 
 
-def _derive_source_name(state: AssessmentState) -> str:
-    if state.extracted_signals:
-        first_source = state.extracted_signals[0].get("source_file")
-        if first_source:
-            return first_source
-    return f"{state.company_name.replace(' ', '_')}_brief.txt"
+def _analysis_mode() -> str:
+    return "demo" if settings.DEMO_MODE else "real"
+
+
+def _evidence_block(state: AssessmentState) -> str:
+    package = state.evidence_package or {}
+    if package.get("evidence_items"):
+        # Rebuild prompt block cheaply from stored package
+        from app.services.evidence import EvidenceItem, EvidencePackage
+
+        items = [
+            EvidenceItem(
+                evidence_id=i.get("evidence_id", "ev_unknown"),
+                document_id=i.get("document_id", ""),
+                source_file=i.get("source_file", ""),
+                signal_type=i.get("signal_type", ""),
+                description=i.get("description", ""),
+                excerpt=i.get("excerpt", ""),
+                page_or_section=i.get("page_or_section"),
+                evidence_tier=i.get("evidence_tier", "missing"),
+                confidence_label=i.get("confidence_label", "uncalibrated"),
+                related_dimensions=i.get("related_dimensions") or [],
+            )
+            for i in package.get("evidence_items", [])
+        ]
+        pkg = EvidencePackage(
+            documents=package.get("documents") or [],
+            evidence_items=items,
+            missing_evidence=package.get("missing_evidence") or [],
+            insufficient_evidence=bool(package.get("insufficient_evidence")),
+            total_chars_analyzed=int(package.get("total_chars_analyzed") or 0),
+            truncation_applied=bool(package.get("truncation_applied")),
+            analysis_notes=package.get("analysis_notes") or [],
+        )
+        return pkg.prompt_block()
+    return (
+        "UNTRUSTED_DOCUMENT_CONTENT_BEGIN\n"
+        "No verified document excerpts available.\n"
+        "UNTRUSTED_DOCUMENT_CONTENT_END"
+    )
+
+
+def _sync_model_meta(state: AssessmentState) -> Dict[str, Any]:
+    summary = LLMRouter.session_summary()
+    return {
+        "analysis_mode": summary.get("execution_mode") or _analysis_mode(),
+        "model_provider": summary.get("provider") or "none",
+        "model_name": summary.get("model") or "none",
+        "model_run_status": summary.get("status") or "not_started",
+        "model_error": summary.get("error"),
+        "model_run_history": summary.get("runs") or [],
+    }
+
+
+def _parse_json_object(raw: str) -> Optional[Dict[str, Any]]:
+    try:
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        try:
+            start = raw.find("{")
+            end = raw.rfind("}")
+            if start >= 0 and end > start:
+                data = json.loads(raw[start : end + 1])
+                if isinstance(data, dict):
+                    return data
+        except Exception:
+            return None
+    return None
+
+
+def _incomplete(state: AssessmentState, reason: str) -> Dict[str, Any]:
+    meta = _sync_model_meta(state)
+    return {
+        **meta,
+        "analysis_incomplete": True,
+        "incomplete_reason": reason,
+        "logs": state.logs + [f"INCOMPLETE: {reason}"],
+    }
 
 
 # 1. Document Understanding Agent
 def document_understanding_node(state: AssessmentState) -> Dict[str, Any]:
     logger.info("Running Node: Document Understanding...")
-    text_sample = (
-        state.extracted_text[:1000]
-        if state.extracted_text
-        else "No uploaded documents found."
+    documents = state.documents or []
+    if not documents and state.extracted_text:
+        documents = [
+            {
+                "filename": "consolidated_upload.txt",
+                "text": state.extracted_text,
+            }
+        ]
+
+    client_assertions = []
+    if state.main_business_goals:
+        client_assertions.append(f"Business goals: {state.main_business_goals}")
+    client_assertions.extend([f"Pain point: {p}" for p in state.pain_points])
+    client_assertions.extend([f"AI goal: {g}" for g in state.ai_goals])
+
+    package = EvidenceExtractor.build_package(
+        documents, client_assertions=client_assertions
     )
+    signals = EvidenceExtractor.as_signal_rows(package)
+    package_dict = package.to_dict()
+    evidence_prompt = package.prompt_block()
 
-    prompt = f"""
-    You are the Document Understanding Agent. Analyze this raw text extract from corporate documentation:
-    ---
-    {text_sample}
-    ---
-    Identify and extract 2 distinct "Extracted Business Signals" representing standard procedures, tech stack elements, or data sources.
-    Provide the output in JSON format exactly as:
-    {{
-        "extracted_signals": [
-            {{
-                "source_file": "Uploaded_SOP_Document.pdf",
-                "signal_type": "Data Source / Process",
-                "description": "Short explanation of what was extracted",
-                "confidence": 90.0
-            }}
-        ]
-    }}
-    """
-
-    json_str = LLMRouter.generate_completion(prompt, require_json=True)
+    # Optional LLM enrichment — must cite evidence ids; never fabricate excerpts.
+    enrichment: List[Dict[str, Any]] = []
     try:
-        data = json.loads(json_str)
-        signals = data.get("extracted_signals", [])
-    except Exception:
-        source_name = _derive_source_name(state)
-        tools_text = ", ".join(state.current_tools[:3]) or "existing internal systems"
-        departments_text = ", ".join(state.departments[:2]) or "core teams"
-        signals = [
-            {
-                "source_file": source_name,
-                "signal_type": "Workflow Evidence",
-                "description": f"Parsed evidence of manual coordination across {departments_text}, with recurring reliance on {tools_text}.",
-                "confidence": 92.0,
-            },
-            {
-                "source_file": source_name,
-                "signal_type": "Operational Priority",
-                "description": f"Detected business focus on '{state.main_business_goals or 'faster delivery'}' with AI goals centered on {', '.join(state.ai_goals[:2]) or 'efficiency and service improvement'}.",
-                "confidence": 88.0,
-            },
-        ]
+        prompt = f"""
+You are the Document Understanding Agent for an evidence-driven readiness assessment.
+Use ONLY the evidence package below. Do not invent filenames, page numbers, quotations, or metrics.
+If evidence is insufficient, return an empty enrichment list and set insufficient_evidence=true.
 
+Company Name: {state.company_name}
+Industry: {state.industry}
+
+{evidence_prompt}
+
+Return JSON:
+{{
+  "insufficient_evidence": <bool>,
+  "enrichment_signals": [
+    {{
+      "source_file": "<must match an evidence source_file>",
+      "signal_type": "<type>",
+      "description": "<finding tied to an excerpt; no fabrication>",
+      "evidence_id": "<must match an evidence_id>",
+      "evidence_tier": "model_inference",
+      "confidence": 0.0
+    }}
+  ]
+}}
+"""
+        raw = LLMRouter.generate_completion(prompt, require_json=True)
+        data = _parse_json_object(raw) or {}
+        for item in data.get("enrichment_signals") or []:
+            eid = item.get("evidence_id")
+            known_ids = {e.get("evidence_id") for e in signals}
+            known_files = {e.get("source_file") for e in signals}
+            if eid and eid in known_ids and item.get("source_file") in known_files:
+                enrichment.append(
+                    {
+                        "source_file": item.get("source_file"),
+                        "signal_type": item.get("signal_type") or "Model Inference",
+                        "description": item.get("description") or "",
+                        "confidence": 0.0,
+                        "document_id": next(
+                            (
+                                s.get("document_id")
+                                for s in signals
+                                if s.get("evidence_id") == eid
+                            ),
+                            "",
+                        ),
+                        "excerpt": next(
+                            (
+                                s.get("excerpt")
+                                for s in signals
+                                if s.get("evidence_id") == eid
+                            ),
+                            "",
+                        ),
+                        "page_or_section": next(
+                            (
+                                s.get("page_or_section")
+                                for s in signals
+                                if s.get("evidence_id") == eid
+                            ),
+                            None,
+                        ),
+                        "evidence_tier": "model_inference",
+                        "evidence_id": eid,
+                    }
+                )
+    except LLMExecutionError as exc:
+        if not settings.DEMO_MODE:
+            return {
+                **_incomplete(state, str(exc)),
+                "evidence_package": package_dict,
+                "extracted_signals": signals,
+                "insufficient_evidence": package.insufficient_evidence,
+                "current_node": "document_understanding",
+            }
+        logger.warning("Document enrichment skipped in demo: %s", exc)
+
+    combined = signals + enrichment
+    meta = _sync_model_meta(state)
     return {
-        "extracted_signals": signals,
+        **meta,
+        "documents": package.documents,
+        "evidence_package": package_dict,
+        "extracted_signals": combined,
+        "insufficient_evidence": package.insufficient_evidence,
+        "extracted_text": state.extracted_text,
         "logs": state.logs
-        + ["Document Understanding Agent extracted 2 key business signals."],
+        + [
+            f"Document Understanding extracted {len(combined)} evidence-backed signals "
+            f"(insufficient={package.insufficient_evidence})."
+        ],
         "current_node": "document_understanding",
     }
 
@@ -77,16 +219,39 @@ def document_understanding_node(state: AssessmentState) -> Dict[str, Any]:
 # 2. Business Context Agent
 def business_context_node(state: AssessmentState) -> Dict[str, Any]:
     logger.info("Running Node: Business Context...")
-    prompt = f"""
-    Generate a professional 3-sentence Executive Business Summary for this company:
-    Company Name: {state.company_name}
-    Industry: {state.industry}
-    Goals: {state.main_business_goals}
-    Pain Points: {", ".join(state.pain_points)}
-    """
+    if state.analysis_incomplete:
+        return {"current_node": "business_context"}
 
-    summary = LLMRouter.generate_completion(prompt)
+    evidence_note = (
+        "Insufficient verified document evidence; summarize intake only and state gaps."
+        if state.insufficient_evidence
+        else "Ground the summary in intake plus verified evidence; do not invent facts."
+    )
+    prompt = f"""
+Generate a professional 3-sentence Executive Business Summary.
+{evidence_note}
+Company Name: {state.company_name}
+Industry: {state.industry}
+Goals: {state.main_business_goals}
+Pain Points: {", ".join(state.pain_points)}
+AI Goals: {", ".join(state.ai_goals)}
+
+{_evidence_block(state)}
+"""
+    try:
+        summary = LLMRouter.generate_completion(prompt)
+    except LLMExecutionError as exc:
+        if settings.DEMO_MODE:
+            summary = (
+                f"[DEMO_SIMULATED] {state.company_name} is exploring AI opportunities. "
+                "This summary is simulated and not evidence-grounded model analysis. "
+                "Collect verified documents before client delivery."
+            )
+        else:
+            return _incomplete(state, str(exc))
+
     return {
+        **_sync_model_meta(state),
         "business_summary": summary,
         "logs": state.logs
         + ["Business Context Agent synthesized company background and goals."],
@@ -97,51 +262,77 @@ def business_context_node(state: AssessmentState) -> Dict[str, Any]:
 # 3. Process Bottleneck Agent
 def process_bottleneck_node(state: AssessmentState) -> Dict[str, Any]:
     logger.info("Running Node: Process Bottleneck...")
-    prompt = f"""
-    Analyze these pain points: {", ".join(state.pain_points)}
-    Departments: {", ".join(state.departments)}
-    Current Tools: {", ".join(state.current_tools)}
-    Goals: {state.main_business_goals}
-    Identify 2 manual process bottlenecks.
-    Format your response as a JSON object:
-    {{
-        "bottlenecks": [
-            {{
-                "department": "Operations or Customer Support",
-                "process_name": "Name of the process",
-                "bottleneck_description": "Explanation of the bottleneck",
-                "ai_potential": "High"
-            }}
-        ]
-    }}
-    """
+    if state.analysis_incomplete:
+        return {"current_node": "process_bottleneck"}
 
-    json_str = LLMRouter.generate_completion(prompt, require_json=True)
+    prompt = f"""
+Identify up to 2 process bottlenecks using intake and verified evidence only.
+If evidence is insufficient, return bottlenecks with evidence_tier="missing" and clearly say evidence is insufficient.
+Do not invent metrics, tools, or quotations.
+
+Pain Points: {", ".join(state.pain_points)}
+Departments: {", ".join(state.departments)}
+Current Tools: {", ".join(state.current_tools)}
+Goals: {state.main_business_goals}
+
+{_evidence_block(state)}
+
+JSON:
+{{
+  "bottlenecks": [
+    {{
+      "department": "<department or Unknown>",
+      "process_name": "<name or Insufficient Evidence>",
+      "bottleneck_description": "<description; state if inferred vs verified>",
+      "ai_potential": "High|Medium|Low|Unknown",
+      "evidence_refs": ["<evidence_id>"],
+      "evidence_tier": "verified|client_assertion|model_inference|assumption|missing"
+    }}
+  ]
+}}
+"""
     try:
-        data = json.loads(json_str)
-        bottlenecks = data.get("bottlenecks", [])
+        raw = LLMRouter.generate_completion(prompt, require_json=True)
+        data = _parse_json_object(raw) or {}
+        bottlenecks = data.get("bottlenecks") or []
+    except LLMExecutionError as exc:
+        if settings.DEMO_MODE:
+            bottlenecks = [
+                {
+                    "department": state.departments[0]
+                    if state.departments
+                    else "Operations",
+                    "process_name": "[DEMO_SIMULATED] Manual Coordination",
+                    "bottleneck_description": (
+                        "[DEMO_SIMULATED] Simulated from intake pain points only."
+                    ),
+                    "ai_potential": "Unknown",
+                    "evidence_tier": "assumption",
+                    "evidence_refs": [],
+                }
+            ]
+        else:
+            return _incomplete(state, str(exc))
     except Exception:
         bottlenecks = [
             {
-                "department": "Operations",
-                "process_name": "Manual Excel Data Triage",
-                "bottleneck_description": "Data engineers spend 3 hours daily copy-pasting records between spreadsheets.",
-                "ai_potential": "High",
-            },
-            {
-                "department": "Customer Support",
-                "process_name": "Email Response Matching",
-                "bottleneck_description": "Help desk manually scans inbox and tags support requests.",
-                "ai_potential": "Medium",
-            },
+                "department": "Unknown",
+                "process_name": "Insufficient Evidence",
+                "bottleneck_description": (
+                    "Could not validate bottlenecks from available evidence. "
+                    "Additional process documentation is required."
+                ),
+                "ai_potential": "Unknown",
+                "evidence_tier": "missing",
+                "evidence_refs": [],
+            }
         ]
 
     return {
+        **_sync_model_meta(state),
         "bottlenecks": bottlenecks,
         "logs": state.logs
-        + [
-            f"Process Bottleneck Agent identified {len(bottlenecks)} core operational bottlenecks."
-        ],
+        + [f"Process Bottleneck Agent recorded {len(bottlenecks)} bottleneck entries."],
         "current_node": "process_bottleneck",
     }
 
@@ -149,188 +340,159 @@ def process_bottleneck_node(state: AssessmentState) -> Dict[str, Any]:
 # 4. AI Use Case Discovery Agent
 def ai_use_case_node(state: AssessmentState) -> Dict[str, Any]:
     logger.info("Running Node: AI Use Case Discovery...")
-    prompt = f"""
-    Based on these bottlenecks: {json.dumps(state.bottlenecks)}
-    Company Name: {state.company_name}
-    Current Tools: {", ".join(state.current_tools)}
-    Goals: {state.main_business_goals}
-    Compliance Requirements: {", ".join(state.compliance_requirements)}
-    Suggest 3 AI use cases mapped to departments:
-    Format your response as a JSON object:
-    {{
-        "use_cases": [
-            {{
-                "use_case_name": "Name of use case",
-                "department": "Department",
-                "description": "Short explanation",
-                "value": "High",
-                "complexity": "Low",
-                "risk": "Low",
-                "priority": "P1",
-                "evidence": "Recommended because uploaded documents show repetitive manual spreadsheets",
-                "confidence": 90.0
-            }}
-        ]
-    }}
-    """
+    if state.analysis_incomplete:
+        return {"current_node": "ai_use_case"}
 
-    json_str = LLMRouter.generate_completion(prompt, require_json=True)
+    prompt = f"""
+Suggest up to 3 AI use cases mapped to departments.
+Use bottlenecks + evidence. Do not fabricate document quotes or measured ROI.
+If evidence is insufficient, mark confidence 0 and evidence_tier=missing/assumption.
+
+Company Name: {state.company_name}
+Current Tools: {", ".join(state.current_tools)}
+Goals: {state.main_business_goals}
+Compliance Requirements: {", ".join(state.compliance_requirements)}
+Bottlenecks: {json.dumps(state.bottlenecks)}
+
+{_evidence_block(state)}
+
+JSON:
+{{
+  "use_cases": [
+    {{
+      "use_case_name": "<name>",
+      "department": "<department>",
+      "description": "<short explanation>",
+      "value": "High|Medium|Low|Unknown",
+      "complexity": "High|Medium|Low|Unknown",
+      "risk": "High|Medium|Low|Unknown",
+      "priority": "P1|P2|P3",
+      "evidence": "<cite evidence_ids or state insufficient evidence>",
+      "confidence": 0.0,
+      "evidence_refs": ["<evidence_id>"],
+      "evidence_tier": "verified|client_assertion|model_inference|assumption|missing",
+      "estimate_flags": ["roi_unmeasured"]
+    }}
+  ]
+}}
+"""
     try:
-        data = json.loads(json_str)
-        use_cases = data.get("use_cases", [])
+        raw = LLMRouter.generate_completion(prompt, require_json=True)
+        data = _parse_json_object(raw) or {}
+        use_cases = data.get("use_cases") or []
+    except LLMExecutionError as exc:
+        if settings.DEMO_MODE:
+            use_cases = [
+                {
+                    "use_case_name": "[DEMO_SIMULATED] Evidence Gathering Assistant",
+                    "department": state.departments[0]
+                    if state.departments
+                    else "Operations",
+                    "description": "Demo-only placeholder; not a client recommendation.",
+                    "value": "Unknown",
+                    "complexity": "Low",
+                    "risk": "Medium",
+                    "priority": "P3",
+                    "evidence": "Insufficient verified evidence",
+                    "confidence": 0.0,
+                    "evidence_tier": "assumption",
+                    "estimate_flags": ["demo_simulated", "roi_unmeasured"],
+                }
+            ]
+        else:
+            return _incomplete(state, str(exc))
     except Exception:
         use_cases = [
             {
-                "use_case_name": "Intelligent Pre-Sales Proposal Copilot",
-                "department": "Sales & Pre-sales",
-                "description": "Intelligent solution drafting companion that pulls from verified proposal assets and past winning bid documents to build compliance-mapped proposal outlines.",
-                "value": "High",
-                "complexity": "Low",
-                "risk": "Low",
-                "priority": "P1",
-                "evidence": "Recommended because workflow analysis shows heavy manual cycles spent on custom solution blocks in proposal compilation.",
-                "confidence": 92.0,
-            },
-            {
-                "use_case_name": "Support Ticket Smart Router",
-                "department": "Customer Support",
-                "description": "Multi-agent classifier routing client emails straight to resolving technicians.",
-                "value": "High",
-                "complexity": "Medium",
-                "risk": "Low",
-                "priority": "P1",
-                "evidence": "Recommended because support desk reports a 4-hour delay in initial email categorizations.",
-                "confidence": 88.0,
-            },
-            {
-                "use_case_name": "Compliance Audit Agent",
-                "department": "Compliance & Governance",
-                "description": "Intelligent contract parser searching client agreements for compliance gaps.",
-                "value": "Medium",
-                "complexity": "High",
-                "risk": "Medium",
-                "priority": "P2",
-                "evidence": "Recommended because compliance requirements call out legal review checklists.",
-                "confidence": 85.0,
-            },
+                "use_case_name": "Insufficient Evidence — Discovery Deferred",
+                "department": "Unknown",
+                "description": (
+                    "Use-case discovery cannot be completed without verified process and data evidence."
+                ),
+                "value": "Unknown",
+                "complexity": "Unknown",
+                "risk": "Unknown",
+                "priority": "P3",
+                "evidence": "missing",
+                "confidence": 0.0,
+                "evidence_tier": "missing",
+                "estimate_flags": ["insufficient_evidence", "roi_unmeasured"],
+            }
         ]
 
+    # Force confidence to uncalibrated 0 unless explicitly reviewed later.
+    for uc in use_cases:
+        if "confidence" in uc:
+            # Preserve numeric dashboard field but treat as uncalibrated estimate marker.
+            try:
+                uc["confidence"] = float(uc.get("confidence") or 0.0)
+            except (TypeError, ValueError):
+                uc["confidence"] = 0.0
+        uc.setdefault("estimate_flags", ["uncalibrated_confidence", "roi_unmeasured"])
+
     return {
+        **_sync_model_meta(state),
         "use_cases": use_cases,
         "logs": state.logs
-        + [
-            f"AI Use Case Discovery Agent generated {len(use_cases)} strategic opportunities."
-        ],
+        + [f"AI Use Case Discovery generated {len(use_cases)} opportunities."],
         "current_node": "ai_use_case",
     }
 
 
-# 5. Readiness Scoring Agent
+# 5. Readiness Scoring Agent (deterministic overall)
 def readiness_scoring_node(state: AssessmentState) -> Dict[str, Any]:
     logger.info("Running Node: Readiness Scoring...")
+    if state.analysis_incomplete:
+        return {"current_node": "readiness_scoring"}
 
-    prompt = f"""
-You are a Senior AI Readiness Analyst with 15+ years of enterprise transformation experience.
-Your job is to produce a rigorous, defensible AI Readiness Scorecard for a real client.
+    scorecard = ScoringEngine.score(
+        company_name=state.company_name,
+        industry=state.industry,
+        departments=state.departments,
+        current_tools=state.current_tools,
+        pain_points=state.pain_points,
+        ai_goals=state.ai_goals,
+        compliance_requirements=state.compliance_requirements,
+        cloud_preference=state.cloud_preference,
+        main_business_goals=state.main_business_goals,
+        evidence_package=state.evidence_package,
+        bottlenecks=state.bottlenecks,
+        use_cases=state.use_cases,
+    )
 
-## Client Profile
-- Company: {state.company_name}
-- Industry: {state.industry}
-- Departments: {", ".join(state.departments)}
-- Current Tools: {", ".join(state.current_tools)}
-- Pain Points: {", ".join(state.pain_points)}
-- AI Goals: {", ".join(state.ai_goals)}
-- Cloud Preference: {state.cloud_preference}
-- Compliance Requirements: {", ".join(state.compliance_requirements)}
-- Identified Bottlenecks: {json.dumps(state.bottlenecks)}
-- Identified Use Cases: {json.dumps(state.use_cases)}
-
-## Scoring Instructions
-Score each dimension from 0–100 based on the evidence above.
-Be critical — most enterprises score 45–70, not 80+.
-For each dimension, provide a 1-sentence justification tied to specific client evidence.
-
-Scoring rubric:
-- data_readiness: Quality, accessibility, and structure of data assets. Penalize for Data Silos, Excel-heavy workflows, no data warehouse.
-- process_readiness: How standardized and documented the processes are. Penalize for Manual Process Overload, tribal knowledge.
-- integration_readiness: API maturity, cloud-native stack, ability to connect systems. Reward cloud-agnostic or modern stack.
-- governance_readiness: Data governance policies, AI ethics policies, audit trails. Penalize for heavy compliance requirements without governance tooling.
-- security_readiness: Data security posture, compliance certifications, access controls. Reward regulated industry experience.
-- team_readiness: AI/ML talent, change management culture, executive sponsorship. Penalize if no AI goals mention upskilling.
-- business_alignment: How clearly AI goals map to revenue, cost, or customer outcomes. Reward specific, measurable goals.
-
-Overall score = weighted average:
-data(20%) + process(15%) + integration(15%) + governance(15%) + security(15%) + team(10%) + alignment(10%)
-
-Automation potential = estimated % of current manual work automatable within 12 months based on identified bottlenecks and use cases.
-
-## Output Format (strict JSON)
-{{
-    "data_readiness": <float>,
-    "data_justification": "<one sentence tied to client evidence>",
-    "process_readiness": <float>,
-    "process_justification": "<one sentence tied to client evidence>",
-    "integration_readiness": <float>,
-    "integration_justification": "<one sentence tied to client evidence>",
-    "governance_readiness": <float>,
-    "governance_justification": "<one sentence tied to client evidence>",
-    "security_readiness": <float>,
-    "security_justification": "<one sentence tied to client evidence>",
-    "team_readiness": <float>,
-    "team_justification": "<one sentence tied to client evidence>",
-    "business_alignment": <float>,
-    "alignment_justification": "<one sentence tied to client evidence>",
-    "overall_score": <float>,
-    "automation_potential": <float>,
-    "readiness_interpretation": "<3-sentence narrative: overall posture, top strength, top gap, recommended first action>"
-}}
-"""
-
-    json_str = LLMRouter.generate_completion(prompt, require_json=True)
+    # Optional narrative polish — never accept LLM overall score.
+    interpretation = scorecard.readiness_interpretation
     try:
-        data = json.loads(json_str)
-        score_keys = [
-            "data_readiness",
-            "process_readiness",
-            "integration_readiness",
-            "governance_readiness",
-            "security_readiness",
-            "team_readiness",
-            "business_alignment",
-            "overall_score",
-        ]
-        for key in score_keys:
-            if key in data:
-                data[key] = round(max(0.0, min(100.0, float(data[key]))), 1)
-        data["automation_potential"] = round(
-            max(0.0, min(100.0, float(data.get("automation_potential", 30.0)))), 1
-        )
-    except Exception:
-        data = {
-            "data_readiness": 55.0,
-            "data_justification": f"Data is fragmented across {', '.join(state.current_tools[:3]) or 'multiple business systems'}, which limits reliable AI access without cleanup.",
-            "process_readiness": 52.0,
-            "process_justification": f"Pain points such as {', '.join(state.pain_points[:2]) or 'manual process overload'} indicate repeatable work, but the process flow is still largely manual.",
-            "integration_readiness": 50.0,
-            "integration_justification": f"The current stack ({', '.join(state.current_tools[:3]) or 'existing tools'}) is workable, but there is limited evidence of shared middleware or mature API connectivity.",
-            "governance_readiness": 56.0,
-            "governance_justification": f"Compliance requirements like {', '.join(state.compliance_requirements[:3]) or 'baseline governance needs'} are present, but AI-specific guardrails are not yet strongly defined.",
-            "security_readiness": 68.0,
-            "security_justification": "The organization appears to have a baseline enterprise security posture, but AI-specific data handling controls still need structured enforcement.",
-            "team_readiness": 49.0,
-            "team_justification": "The intake shows interest in AI outcomes, but does not provide strong evidence of training, operating ownership, or change management readiness.",
-            "business_alignment": 70.0,
-            "alignment_justification": "The proposed AI goals map directly to cost reduction and workflow acceleration, which supports a focused pilot recommendation.",
-            "overall_score": 57.6,
-            "automation_potential": 35.0,
-            "readiness_interpretation": "Overall readiness is moderate, with the clearest strength in business alignment and the largest gap in team preparedness. The company can justify a scoped pilot, but should avoid broad rollout before process and governance controls mature. Start with one high-value workflow where human review remains mandatory.",
-        }
+        prompt = f"""
+Write a 3-sentence readiness interpretation for {state.company_name}.
+Do not output scores. Do not invent metrics. Mention insufficient evidence if true={state.insufficient_evidence}.
+Deterministic overall (for context only, do not recalculate): {scorecard.overall_score}
+Missing evidence: {json.dumps(state.evidence_package.get("missing_evidence") or [])}
+{_evidence_block(state)}
+Return plain text only.
+"""
+        interpretation = LLMRouter.generate_completion(prompt)
+        if settings.DEMO_MODE and not interpretation.startswith("[DEMO"):
+            # Keep simulation marker when demo provider was used.
+            summary = LLMRouter.session_summary()
+            if summary.get("status") == "demo_simulated":
+                interpretation = f"[DEMO_SIMULATED] {interpretation}"
+    except LLMExecutionError:
+        if not settings.DEMO_MODE and not scorecard.insufficient_evidence:
+            # Scoring itself is deterministic; narrative failure is non-fatal if scores exist.
+            pass
+
+    flat = scorecard.flat_assessment_fields()
+    flat["readiness_interpretation"] = interpretation
+    flat["automation_potential_basis"] = scorecard.automation_potential_basis
 
     return {
-        **data,
+        **_sync_model_meta(state),
+        **flat,
         "logs": state.logs
         + [
-            f"Readiness Scoring Agent evaluated score categories. Overall: {int(data.get('overall_score', 0))}/100."
+            f"Readiness Scoring used {scorecard.scoring_method} "
+            f"({scorecard.rubric_version}). Overall={scorecard.overall_score}/100."
         ],
         "current_node": "readiness_scoring",
     }
@@ -339,48 +501,71 @@ Automation potential = estimated % of current manual work automatable within 12 
 # 6. Risk & Governance Agent
 def risk_governance_node(state: AssessmentState) -> Dict[str, Any]:
     logger.info("Running Node: Risk & Governance...")
-    prompt = f"""
-    For these compliance requirements: {", ".join(state.compliance_requirements)}
-    Current Tools: {", ".join(state.current_tools)}
-    Departments: {", ".join(state.departments)}
-    Suggest 2 major AI risks and controls.
-    Format your response in JSON:
-    {{
-        "risks": [
-            {{
-                "risk_name": "Name of risk",
-                "severity": "High or Medium",
-                "recommendation": "Recommendation statement",
-                "is_control_met": 0
-            }}
-        ]
-    }}
-    """
+    if state.analysis_incomplete:
+        return {"current_node": "risk_governance"}
 
-    json_str = LLMRouter.generate_completion(prompt, require_json=True)
+    prompt = f"""
+Suggest up to 2 major AI risks and controls.
+Do not claim controls are met unless evidence_tier=verified supports it.
+Compliance Requirements: {", ".join(state.compliance_requirements)}
+Current Tools: {", ".join(state.current_tools)}
+Departments: {", ".join(state.departments)}
+{_evidence_block(state)}
+
+JSON:
+{{
+  "risks": [
+    {{
+      "risk_name": "<name>",
+      "severity": "High|Medium|Low",
+      "recommendation": "<recommendation>",
+      "is_control_met": 0,
+      "evidence_refs": [],
+      "evidence_tier": "assumption|missing|verified|client_assertion|model_inference"
+    }}
+  ]
+}}
+"""
     try:
-        data = json.loads(json_str)
-        risks = data.get("risks", [])
+        raw = LLMRouter.generate_completion(prompt, require_json=True)
+        data = _parse_json_object(raw) or {}
+        risks = data.get("risks") or []
+    except LLMExecutionError as exc:
+        if settings.DEMO_MODE:
+            risks = [
+                {
+                    "risk_name": "[DEMO_SIMULATED] Unverified Data Exposure",
+                    "severity": "High",
+                    "recommendation": "Keep DEMO_MODE outputs internal; require verified analysis before delivery.",
+                    "is_control_met": 0,
+                    "evidence_tier": "assumption",
+                }
+            ]
+        else:
+            return _incomplete(state, str(exc))
     except Exception:
         risks = [
             {
-                "risk_name": "Unintentional Leak of Sensitive Client PII",
+                "risk_name": "Insufficient Evidence for Risk Closure",
                 "severity": "High",
-                "recommendation": "Deploy local open-source PII scrubbers on FastAPI router prior to third-party API dispatches.",
+                "recommendation": (
+                    "Do not approve external AI processing until governance and security evidence is collected."
+                ),
                 "is_control_met": 0,
-            },
-            {
-                "risk_name": "Drift in Smart Invoice Layout Extractor",
-                "severity": "Medium",
-                "recommendation": "Enforce quarterly evaluations of schema parsing maps against human verified outputs.",
-                "is_control_met": 0,
-            },
+                "evidence_tier": "missing",
+            }
         ]
 
+    for risk in risks:
+        # Never trust model claims that controls are met without verified evidence.
+        if risk.get("evidence_tier") != "verified":
+            risk["is_control_met"] = 0
+
     return {
+        **_sync_model_meta(state),
         "risks": risks,
         "logs": state.logs
-        + [f"Risk & Governance Agent added {len(risks)} entries to risk register."],
+        + [f"Risk & Governance Agent added {len(risks)} risk register entries."],
         "current_node": "risk_governance",
     }
 
@@ -388,52 +573,76 @@ def risk_governance_node(state: AssessmentState) -> Dict[str, Any]:
 # 7. Roadmap Planning Agent
 def roadmap_planning_node(state: AssessmentState) -> Dict[str, Any]:
     logger.info("Running Node: Roadmap Planning...")
-    prompt = f"""
-    Company Name: {state.company_name}
-    Departments: {", ".join(state.departments)}
-    Current Tools: {", ".join(state.current_tools)}
-    Main Goals: {state.main_business_goals}
-    Build a 30/60/90 day roadmap containing 3 strategic steps for {state.company_name}.
-    Format in JSON:
-    {{
-        "roadmap": [
-            {{
-                "phase": "30-Day",
-                "action_item": "Action description",
-                "expected_impact": "Expected outcome description",
-                "confidence": 90.0
-            }}
-        ]
-    }}
-    """
+    if state.analysis_incomplete:
+        return {"current_node": "roadmap_planning"}
 
-    json_str = LLMRouter.generate_completion(prompt, require_json=True)
+    prompt = f"""
+Build a 30/60/90 day roadmap with 3 steps for {state.company_name}.
+If evidence is insufficient, first steps must prioritize evidence collection.
+Do not invent ROI percentages.
+Departments: {", ".join(state.departments)}
+Current Tools: {", ".join(state.current_tools)}
+Main Goals: {state.main_business_goals}
+Use Cases: {json.dumps(state.use_cases)}
+{_evidence_block(state)}
+
+JSON:
+{{
+  "roadmap": [
+    {{
+      "phase": "30-Day",
+      "action_item": "<action>",
+      "expected_impact": "<impact; mark estimates clearly>",
+      "confidence": 0.0,
+      "estimate_flags": ["uncalibrated_confidence"]
+    }}
+  ]
+}}
+"""
     try:
-        data = json.loads(json_str)
-        roadmap = data.get("roadmap", [])
+        raw = LLMRouter.generate_completion(prompt, require_json=True)
+        data = _parse_json_object(raw) or {}
+        roadmap = data.get("roadmap") or []
+    except LLMExecutionError as exc:
+        if settings.DEMO_MODE:
+            roadmap = [
+                {
+                    "phase": "30-Day",
+                    "action_item": "[DEMO_SIMULATED] Collect missing evidence and confirm scope.",
+                    "expected_impact": "Estimate only — demo simulation.",
+                    "confidence": 0.0,
+                }
+            ]
+        else:
+            return _incomplete(state, str(exc))
     except Exception:
         roadmap = [
             {
                 "phase": "30-Day",
-                "action_item": "Scaffold operations datastore and pilot Excel Ingestion Automation Agent.",
-                "expected_impact": "Reduces invoice input cycles by 40% immediately.",
-                "confidence": 92.0,
+                "action_item": "Collect missing process, data, and governance evidence before pilot build.",
+                "expected_impact": "Estimate: enables defensible scoring and pilot selection.",
+                "confidence": 0.0,
+                "estimate_flags": ["insufficient_evidence"],
             },
             {
                 "phase": "60-Day",
-                "action_item": "Deploy help desk Support Ticket Router for shadow tests on client emails.",
-                "expected_impact": "Decreases support queue response times by 30%.",
-                "confidence": 88.0,
+                "action_item": "Run a human-reviewed discovery workshop and validate bottlenecks with owners.",
+                "expected_impact": "Estimate: converts assumptions into verified findings.",
+                "confidence": 0.0,
             },
             {
                 "phase": "90-Day",
-                "action_item": "Initiate board contract auditor agent and host cross-departmental alignment classes.",
-                "expected_impact": "Reduces compliance audit preparation window from 10 days to 24 hours.",
-                "confidence": 85.0,
+                "action_item": "Only then scope a bounded pilot with explicit success metrics and review gates.",
+                "expected_impact": "Estimate: reduces delivery risk from unsupported claims.",
+                "confidence": 0.0,
             },
         ]
 
+    for item in roadmap:
+        item["confidence"] = 0.0
+
     return {
+        **_sync_model_meta(state),
         "roadmap_items": roadmap,
         "logs": state.logs
         + ["Roadmap Planning Agent created 30/60/90-day action steps."],
@@ -444,110 +653,125 @@ def roadmap_planning_node(state: AssessmentState) -> Dict[str, Any]:
 # 8. Proposal Writing Agent
 def proposal_writing_node(state: AssessmentState) -> Dict[str, Any]:
     logger.info("Running Node: Proposal Writing...")
-    prompt = f"""
-You are a Principal AI Solutions Architect and Proposal Strategist at a top-tier consulting firm.
-Your job is to generate a commercially precise, client-ready AI Enablement Proposal.
-This proposal will be handed directly to the client's CTO and CFO — it must be specific, credible, and grounded in their actual context.
+    if state.analysis_incomplete:
+        return {"current_node": "proposal_writing"}
 
-## Client Context
-- Company: {state.company_name}
-- Industry: {state.industry}
-- Company Size / Departments: {", ".join(state.departments)}
-- Pain Points: {", ".join(state.pain_points)}
-- AI Goals: {", ".join(state.ai_goals)}
-- Compliance Requirements: {", ".join(state.compliance_requirements)}
-- Cloud Preference: {state.cloud_preference}
-- Current Tools: {", ".join(state.current_tools)}
-- Overall AI Readiness Score: {state.overall_score}/100
-- Identified Use Cases: {json.dumps(state.use_cases)}
-- Identified Bottlenecks: {json.dumps(state.bottlenecks)}
-- Identified Risks: {json.dumps(state.risks)}
-- 90-Day Roadmap: {json.dumps(state.roadmap_items)}
-
-## Instructions
-
-### Recommended Pilot
-Select the single best P1 use case as the recommended pilot project.
-Justify the selection using specific evidence from bottlenecks, goals, and readiness score.
-The pilot should be the one with highest value-to-complexity ratio and lowest risk.
-
-### Budget Estimation
-Estimate a realistic budget range in USD based on:
-- Industry norms for the identified use case type
-- Number of departments involved
-- Integration complexity (consider current tools and cloud preference)
-- Compliance overhead (more compliance = higher cost)
-- Typical ranges: Simple RAG/chatbot pilots = $15K–$35K | Multi-agent workflow automation = $40K–$90K | Enterprise-grade with compliance = $80K–$150K+
-
-### ROI Projection
-Estimate ROI timeline based on:
-- Automation potential score
-- Identified bottleneck severity
-- Pilot use case value rating
-- Typical ranges: High-value, low-complexity pilots = 2–4 months | Mid-complexity = 4–7 months | High-compliance/complex = 8–14 months
-
-### Executive Summary
-Write a 3-sentence executive summary that:
-1. States the client's core AI opportunity
-2. Recommends the pilot with specific expected impact
-3. Projects the business outcome if deployed within 90 days
-
-## Output Format (strict JSON)
-{{
-    "recommended_pilot": {{
-        "name": "<use case name>",
-        "department": "<department>",
-        "why": "<2-sentence justification grounded in client evidence>",
-        "expected_impact": "<specific, quantified impact statement — e.g. reduce X by Y% in Z weeks>",
-        "confidence": <float 0–100>,
-        "complexity": "<Low | Medium | High>",
-        "estimated_duration_weeks": <int>
-    }},
-    "proposal_summary": {{
-        "title": "AI Enablement Strategy Proposal: {state.company_name}",
-        "executive_summary": "<3-sentence executive summary>",
-        "est_budget": "<range in USD — e.g. $42,000 – $58,000>",
-        "roi_projection": "<specific timeline and trigger — e.g. ROI within 4–5 months post-deployment, driven by 35% reduction in manual ops overhead>",
-        "key_risks_acknowledged": ["<risk 1>", "<risk 2>"],
-        "next_step": "<single clear recommended next action for the client>"
-    }}
-}}
-"""
-
-    json_str = LLMRouter.generate_completion(prompt, require_json=True)
-    try:
-        data = json.loads(json_str)
-        pilot = data.get("recommended_pilot", {})
-        proposal = data.get("proposal_summary", {})
-    except Exception:
+    if state.insufficient_evidence and not settings.DEMO_MODE:
         pilot = {
-            "name": "Intelligent Pre-Sales Proposal Copilot",
-            "department": "Sales & Pre-sales",
-            "why": "This use case offers the strongest value-to-complexity ratio for an initial rollout and directly addresses documented manual proposal bottlenecks. It also keeps governance risk manageable because human review can remain in the loop.",
-            "expected_impact": "Reduce first-draft proposal turnaround by 25-40% within the initial pilot scope.",
-            "confidence": 90.0,
+            "name": "Evidence Completion Sprint",
+            "department": "Operations",
+            "why": (
+                "Verified document evidence is insufficient for a defensible production pilot "
+                "recommendation. Close evidence gaps first."
+            ),
+            "expected_impact": "Estimate only: improves evidence completeness prior to ROI claims.",
+            "confidence": 0.0,
             "complexity": "Low",
-            "estimated_duration_weeks": 6,
+            "estimated_duration_weeks": 4,
+            "evidence_tier": "missing",
+            "estimate_flags": ["insufficient_evidence", "roi_unmeasured"],
         }
         proposal = {
             "title": f"AI Enablement Strategy Proposal: {state.company_name}",
-            "executive_summary": f"{state.company_name} has a credible AI opportunity in repetitive knowledge work. A focused pilot around {pilot['name']} should improve cycle time without forcing a full platform transformation. If launched within 90 days, it can create measurable proof of value and a stronger case for broader rollout.",
-            "est_budget": "$20,000 - $35,000",
-            "roi_projection": "ROI within 3-5 months post-deployment, driven by faster turnaround on manual document workflows.",
+            "executive_summary": (
+                f"{state.company_name} does not yet have sufficient verified evidence for a firm "
+                "AI pilot recommendation. Next step is structured evidence collection with human review."
+            ),
+            "est_budget": "Estimate only — pending evidence",
+            "roi_projection": "ROI assumption unavailable — not supported by measured data",
             "key_risks_acknowledged": [
-                "Weak source quality may reduce early output trust.",
-                "Governance controls may trail pilot velocity without formal review ownership.",
+                "Insufficient verified evidence",
+                "Risk of over-claiming automation benefits",
             ],
-            "next_step": "Lock pilot scope, success metrics, and review owners before build kickoff.",
+            "next_step": "Upload process, data, and governance artifacts, then re-run analysis.",
+        }
+        return {
+            **_sync_model_meta(state),
+            "recommended_pilot": pilot,
+            "proposal_summary": proposal,
+            "logs": state.logs
+            + ["Proposal Writing deferred firm pilot due to insufficient evidence."],
+            "current_node": "proposal_writing",
         }
 
+    prompt = f"""
+Generate a commercially careful AI Enablement Proposal.
+Mark budget and ROI as estimates unless measured data is present (it is not).
+Do not invent document quotations.
+
+Company: {state.company_name}
+Industry: {state.industry}
+Pain Points: {", ".join(state.pain_points)}
+AI Goals: {", ".join(state.ai_goals)}
+Compliance Requirements: {", ".join(state.compliance_requirements)}
+Overall AI Readiness Score: {state.overall_score}/100
+Use Cases: {json.dumps(state.use_cases)}
+Bottlenecks: {json.dumps(state.bottlenecks)}
+Risks: {json.dumps(state.risks)}
+Roadmap: {json.dumps(state.roadmap_items)}
+{_evidence_block(state)}
+
+JSON:
+{{
+  "recommended_pilot": {{
+    "name": "<use case name>",
+    "department": "<department>",
+    "why": "<justification grounded in evidence or explicitly assumed>",
+    "expected_impact": "<mark as estimate>",
+    "confidence": 0.0,
+    "complexity": "Low|Medium|High|Unknown",
+    "estimated_duration_weeks": 6,
+    "estimate_flags": ["roi_unmeasured", "uncalibrated_confidence"]
+  }},
+  "proposal_summary": {{
+    "title": "AI Enablement Strategy Proposal: {state.company_name}",
+    "executive_summary": "<3 sentences>",
+    "est_budget": "<estimate range; label as estimate>",
+    "roi_projection": "<assumption labeled as estimate>",
+    "key_risks_acknowledged": ["<risk 1>", "<risk 2>"],
+    "next_step": "<single next action>"
+  }}
+}}
+"""
+    try:
+        raw = LLMRouter.generate_completion(prompt, require_json=True)
+        data = _parse_json_object(raw) or {}
+        pilot = data.get("recommended_pilot") or {}
+        proposal = data.get("proposal_summary") or {}
+    except LLMExecutionError as exc:
+        if settings.DEMO_MODE:
+            pilot = {
+                "name": "[DEMO_SIMULATED] Evidence-Gathering Sprint",
+                "department": "Operations",
+                "why": "Demo mode only.",
+                "expected_impact": "Estimate only.",
+                "confidence": 0.0,
+                "complexity": "Low",
+                "estimated_duration_weeks": 4,
+            }
+            proposal = {
+                "title": f"[DEMO_SIMULATED] AI Enablement Strategy Proposal: {state.company_name}",
+                "executive_summary": "[DEMO_SIMULATED] Simulated proposal — not client-ready.",
+                "est_budget": "Estimate only",
+                "roi_projection": "ROI assumption — not measured",
+                "key_risks_acknowledged": ["Demo simulation"],
+                "next_step": "Disable DEMO_MODE and configure a model provider.",
+            }
+        else:
+            return _incomplete(state, str(exc))
+    except Exception:
+        return _incomplete(state, "Malformed proposal output from model")
+
+    if "confidence" in pilot:
+        pilot["confidence"] = 0.0
+    pilot.setdefault("estimate_flags", ["roi_unmeasured", "uncalibrated_confidence"])
+
     return {
+        **_sync_model_meta(state),
         "recommended_pilot": pilot,
         "proposal_summary": proposal,
         "logs": state.logs
-        + [
-            "Proposal Writing Agent designed pilot card and budget model from client context."
-        ],
+        + ["Proposal Writing Agent produced pilot card with estimate flags."],
         "current_node": "proposal_writing",
     }
 
@@ -555,10 +779,14 @@ Write a 3-sentence executive summary that:
 # 9. Report Generation Agent
 def report_generation_node(state: AssessmentState) -> Dict[str, Any]:
     logger.info("Running Node: Report Generation...")
+    meta = _sync_model_meta(state)
+    status_note = (
+        "Assessment marked incomplete due to model/evidence failure."
+        if state.analysis_incomplete
+        else "Assessment pipeline synchronized."
+    )
     return {
-        "logs": state.logs
-        + [
-            "Report Generation Agent fully synchronized pipeline! Assessment completed successfully."
-        ],
+        **meta,
+        "logs": state.logs + [f"Report Generation Agent: {status_note}"],
         "current_node": "report_generation",
     }

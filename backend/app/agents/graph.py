@@ -1,19 +1,22 @@
 import logging
-from typing import Dict, Any
-from langgraph.graph import StateGraph, END
+from typing import Any, Dict
+
 from langgraph.checkpoint.memory import MemorySaver
-from app.agents.state import AssessmentState
+from langgraph.graph import END, StateGraph
+
 from app.agents.nodes.agent_nodes import (
-    document_understanding_node,
-    business_context_node,
-    process_bottleneck_node,
     ai_use_case_node,
+    business_context_node,
+    document_understanding_node,
+    process_bottleneck_node,
+    proposal_writing_node,
     readiness_scoring_node,
+    report_generation_node,
     risk_governance_node,
     roadmap_planning_node,
-    proposal_writing_node,
-    report_generation_node,
 )
+from app.agents.state import AssessmentState
+from app.services.llm_router import LLMRouter
 
 logger = logging.getLogger("AssessmentOrchestrator")
 
@@ -60,6 +63,7 @@ class AssessmentOrchestrator:
         logger.info(
             f"Triggering LangGraph run on thread {thread_id} for assessment {initial_state.get('assessment_id')}..."
         )
+        LLMRouter.reset_session()
         config = {"configurable": {"thread_id": thread_id}}
 
         # Compile input structure
@@ -67,5 +71,11 @@ class AssessmentOrchestrator:
 
         # Run graph
         final_state = self.app.invoke(inputs, config=config)
-        logger.info("LangGraph run completed successfully.")
+        if isinstance(final_state, dict) and final_state.get("analysis_incomplete"):
+            logger.warning(
+                "LangGraph run finished incomplete: %s",
+                final_state.get("incomplete_reason"),
+            )
+        else:
+            logger.info("LangGraph run completed successfully.")
         return final_state
