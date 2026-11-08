@@ -6,7 +6,8 @@ import pypdf
 import docx
 import pptx
 
-API_BASE = "http://localhost:8000/api/v1"
+_BACKEND_BASE = os.getenv("E2E_BACKEND_BASE", "http://localhost:8000").rstrip("/")
+API_BASE = f"{_BACKEND_BASE}/api/v1"
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 TEST_PACK_DIR = os.path.join(_REPO_ROOT, "AI_Readiness_E2E_Test_Pack 2")
 REPORT_PATH = os.path.join(
@@ -189,7 +190,7 @@ def main():
     # 2. Check Backend Health and Readiness
     print("\nStep 2: Checking backend health...")
     try:
-        health_res = requests.get("http://localhost:8000/healthz", timeout=5)
+        health_res = requests.get(f"{_BACKEND_BASE}/healthz", timeout=5)
         health_data = health_res.json()
         print(f"Health check status code: {health_res.status_code}")
         print(f"Health check response: {health_data}")
@@ -201,13 +202,20 @@ def main():
         sys.exit(1)
 
     try:
-        ready_res = requests.get("http://localhost:8000/readyz", timeout=5)
+        ready_res = requests.get(f"{_BACKEND_BASE}/readyz", timeout=5)
         ready_data = ready_res.json()
         print(f"Readiness check status code: {ready_res.status_code}")
         print(f"Readiness check response: {ready_data}")
         assert ready_res.status_code == 200
         assert ready_data.get("status") == "ready"
-        print("[PASS] Backend readiness check passed.")
+        assert ready_data.get("dialect") == "postgresql", (
+            f"Docker E2E must use PostgreSQL, got dialect={ready_data.get('dialect')!r}"
+        )
+        driver = ready_data.get("driver") or ""
+        assert "psycopg" in driver, (
+            f"Expected psycopg2 driver for PostgreSQL, got driver={driver!r}"
+        )
+        print(f"[PASS] Backend readiness check passed (dialect=postgresql, driver={driver}).")
     except Exception as e:
         print(f"[FAIL] Backend readiness check failed: {e}")
         sys.exit(1)
@@ -442,15 +450,20 @@ def main():
                 reloaded.get("client_summary")
                 == "E2E Test: Overridden Client summary for Apex Consulting Partners."
             )
-            assert reloaded.get("overall_score") == 85.5
+            # Phase 1 scoring: human overrides of dimension scores recompute overall
+            # via deterministic_rubric_v1 — raw overall_score payloads are not trusted.
+            assert reloaded.get("overall_score") != 85.5
+            assert float(reloaded.get("overall_score") or 0) > 0
             assert (
                 reloaded.get("recommended_first_pilot")
                 == "Overridden Pre-Sales proposal assistant MVP"
             )
             assert reloaded.get("data_readiness") == 75.0
+            assert reloaded.get("process_readiness") == 80.0
             assert reloaded.get("approval_status") == "reviewed"
             print(
-                "[PASS] Persistence verified successfully! Values match overridden inputs."
+                "[PASS] Persistence verified successfully! Overrides saved; overall "
+                f"recomputed to {reloaded.get('overall_score')} from dimension scores."
             )
         else:
             print(

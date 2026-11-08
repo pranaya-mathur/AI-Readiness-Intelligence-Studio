@@ -44,11 +44,17 @@ class Settings(BaseSettings):
 
     @property
     def DATABASE_URL(self) -> str:
+        """Return SQLAlchemy URL. Prefer explicit psycopg2 driver (installed via psycopg2-binary)."""
         database_url_override = os.getenv("DATABASE_URL")
         if database_url_override:
+            # Normalize bare postgresql:// to psycopg2 so SQLAlchemy does not require psycopg v3.
+            if database_url_override.startswith("postgresql://"):
+                return "postgresql+psycopg2://" + database_url_override[len("postgresql://") :]
+            if database_url_override.startswith("postgres://"):
+                return "postgresql+psycopg2://" + database_url_override[len("postgres://") :]
             return database_url_override
         return (
-            f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
+            f"postgresql+psycopg2://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
             f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
         )
 

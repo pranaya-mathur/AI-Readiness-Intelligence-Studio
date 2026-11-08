@@ -17,11 +17,18 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
+# Prefer explicit Alembic/database URLs, then the app settings URL (Postgres when configured).
+# Never silently default to SQLite when REQUIRE_POSTGRES is enabled.
 database_url = (
     os.getenv("ALEMBIC_DATABASE_URL")
     or os.getenv("DATABASE_URL")
-    or settings.SQLITE_URL
+    or settings.DATABASE_URL
 )
+if settings.REQUIRE_POSTGRES and database_url.startswith("sqlite"):
+    raise RuntimeError(
+        "REQUIRE_POSTGRES=true but Alembic resolved a SQLite URL. "
+        "Set DATABASE_URL or POSTGRES_* for PostgreSQL migrations."
+    )
 config.set_main_option("sqlalchemy.url", database_url)
 
 
@@ -46,7 +53,9 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
+        context.configure(
+            connection=connection, target_metadata=target_metadata, compare_type=True
+        )
 
         with context.begin_transaction():
             context.run_migrations()

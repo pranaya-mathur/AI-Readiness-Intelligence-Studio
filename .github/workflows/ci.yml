@@ -121,18 +121,22 @@ jobs:
       - name: Checkout Codebase
         uses: actions/checkout@v4
 
+      # Pin to aquasecurity/trivy-action@v0.35.0 (commit SHA) for reproducible installs.
+      # Do not use @master — it has caused tool-install failures and missing SARIF output.
       - name: Run Trivy Filesystem Security Scan
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
         with:
           scan-type: "fs"
+          scan-ref: "."
           ignore-unfixed: true
           format: "sarif"
           output: "trivy-results.sarif"
           severity: "HIGH,CRITICAL"
+          exit-code: "1"
 
       - name: Upload Scan Results to Security Tab
         uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        if: always() && hashFiles('trivy-results.sarif') != ''
         with:
           sarif_file: "trivy-results.sarif"
 
@@ -170,6 +174,8 @@ jobs:
 
       - name: Spin Up Docker Compose Network (Offline/Fallback Stack)
         env:
+          REQUIRE_POSTGRES: "true"
+          DATABASE_URL: "postgresql+psycopg2://postgres:postgres@db:5432/aireadiness"
           USE_OLLAMA: "true"
           ALLOW_OLLAMA_FALLBACK: "true"
           DEMO_MODE: "false"
@@ -178,9 +184,11 @@ jobs:
           ENABLE_DEMO_WORKSPACE: "true"
           OLLAMA_REASONING_MODEL: phi3.5:latest
           OLLAMA_STRUCTURED_MODEL: phi3.5:latest
+          OLLAMA_LIGHTWEIGHT_MODEL: phi3.5:latest
         run: |
           docker compose build
-          docker compose up -d
+          # Start database + model server first; migrate before app traffic.
+          docker compose up -d db ollama
 
       - name: Poll PostgreSQL pgvector Health Gate
         run: |
@@ -198,6 +206,34 @@ jobs:
             exit 1
           fi
           echo "[PASS] PostgreSQL pgvector is fully online and healthy."
+
+      - name: Execute Alembic Migrations Against PostgreSQL
+        env:
+          REQUIRE_POSTGRES: "true"
+          DATABASE_URL: "postgresql+psycopg2://postgres:postgres@db:5432/aireadiness"
+        run: |
+          echo "Migrating the intended PostgreSQL database (no SQLite fallback, no stamp)..."
+          docker compose run --rm --no-deps \
+            -e REQUIRE_POSTGRES=true \
+            -e DATABASE_URL=postgresql+psycopg2://postgres:postgres@db:5432/aireadiness \
+            -e POSTGRES_HOST=db \
+            backend alembic upgrade head
+
+      - name: Start Backend and Frontend Services
+        env:
+          REQUIRE_POSTGRES: "true"
+          DATABASE_URL: "postgresql+psycopg2://postgres:postgres@db:5432/aireadiness"
+          USE_OLLAMA: "true"
+          ALLOW_OLLAMA_FALLBACK: "true"
+          DEMO_MODE: "false"
+          ALLOW_HEURISTIC_FALLBACK: "false"
+          ENABLE_DEMO_AUTH: "true"
+          ENABLE_DEMO_WORKSPACE: "true"
+          OLLAMA_REASONING_MODEL: phi3.5:latest
+          OLLAMA_STRUCTURED_MODEL: phi3.5:latest
+          OLLAMA_LIGHTWEIGHT_MODEL: phi3.5:latest
+        run: |
+          docker compose up -d backend frontend
 
       - name: Poll Local Ollama Health Gate
         run: |
@@ -223,10 +259,30 @@ jobs:
           docker compose exec -T ollama ollama pull phi3.5:latest
           docker compose exec -T ollama ollama list
 
-      - name: Execute Alembic Database Migrations Dry-Run
+      - name: Verify readyz Reports PostgreSQL
         run: |
-          echo "Running database schema migrations inside backend container..."
-          docker compose exec -T backend alembic upgrade head
+          echo "Waiting for backend /readyz with dialect=postgresql..."
+          attempts=0
+          until curl -sf http://localhost:8000/readyz > /tmp/readyz.json || [ $attempts -gt 30 ]; do
+            echo " - Backend not ready yet. Waiting 3s..."
+            sleep 3
+            attempts=$((attempts+1))
+          done
+          if [ $attempts -gt 30 ]; then
+            echo "[FAIL] Backend readiness timeout!"
+            docker compose logs backend
+            exit 1
+          fi
+          python3 - <<'PY'
+          import json, sys
+          data = json.load(open("/tmp/readyz.json"))
+          print("readyz:", data)
+          assert data.get("status") == "ready", data
+          assert data.get("dialect") == "postgresql", data
+          driver = (data.get("driver") or "")
+          assert "psycopg" in driver, data
+          print("[PASS] readyz confirms PostgreSQL via", driver)
+          PY
 
       - name: Run E2E Test Suite Programmatic Assertions
         run: |

@@ -66,10 +66,22 @@ def _assessment_is_client_exportable(ass: Assessment) -> tuple[bool, str]:
 
 
 def _is_internal_demo_export(ass: Assessment, mode: str | None) -> bool:
-    return (mode or "").lower() == "demo" or (
-        (getattr(ass, "analysis_mode", None) or "").lower() == "demo"
-        and (mode or "").lower() in {"demo", "showcase"}
-    )
+    """Allow export bypass only for genuine demo/simulated assessments in demo envs.
+
+    Real assessments always require successful completion + human approval for
+    PDF/DOCX/PPTX exports, regardless of ``mode=demo`` query parameter.
+    """
+    if (mode or "").lower() != "demo":
+        return False
+    # Authorized demo environments only — never unlock production client exports.
+    if not (settings.ENABLE_DEMO_WORKSPACE or settings.DEMO_MODE):
+        return False
+    analysis_mode = (getattr(ass, "analysis_mode", None) or "").lower()
+    model_status = (getattr(ass, "model_run_status", None) or "").lower()
+    return analysis_mode == "demo" or model_status in {
+        "demo_simulated",
+        "simulated",
+    }
 
 
 def normalize_department(use_case_name: str, description: str) -> str:
@@ -1093,6 +1105,14 @@ def create_walkthrough_workspace(
             )
         if existing_sample.approval_status != "approved":
             existing_sample.approval_status = "approved"
+        # Mark walkthrough seed as demo/simulated so internal demo export is gated correctly.
+        if (existing_sample.analysis_mode or "").lower() != "demo":
+            existing_sample.analysis_mode = "demo"
+        if (existing_sample.model_run_status or "").lower() not in {
+            "demo_simulated",
+            "simulated",
+        }:
+            existing_sample.model_run_status = "demo_simulated"
         db.commit()
         db.refresh(existing_sample)
         return existing_sample
@@ -1131,6 +1151,11 @@ def create_walkthrough_workspace(
         confidence_score=92.0,
         status="completed",
         risk_level="Medium",
+        analysis_mode="demo",
+        model_run_status="demo_simulated",
+        model_provider="demo",
+        model_name="walkthrough-seed",
+        scoring_method="demo_seed",
         # Breakdown
         data_readiness=55.0,
         data_justification="Proposal content and operational knowledge exist across Salesforce, Excel, and SharePoint, but the data remains fragmented enough to limit immediate AI reuse without cleanup.",

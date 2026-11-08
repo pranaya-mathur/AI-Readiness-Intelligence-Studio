@@ -20,14 +20,25 @@ except RuntimeError as safety_error:
     logger.error(str(safety_error))
     raise
 
-# 1. Automatically create database tables (SQLite fallback or PostgreSQL)
+# 1. Schema bootstrap
+# PostgreSQL deployments must use Alembic (`alembic upgrade head`) — do not create_all
+# ahead of migrations (that causes "table already exists" on fresh CI volumes).
+# Local SQLite keeps create_all + ensure_runtime_schema for developer convenience.
 try:
-    logger.info("Initializing database schemas...")
-    Base.metadata.create_all(bind=engine)
-    ensure_runtime_schema()
-    logger.info("Database schemas initialized successfully.")
+    if settings.REQUIRE_POSTGRES:
+        logger.info(
+            "REQUIRE_POSTGRES=true: skipping create_all; schema must come from Alembic."
+        )
+        ensure_runtime_schema()
+    else:
+        logger.info("Initializing database schemas (create_all + runtime patches)...")
+        Base.metadata.create_all(bind=engine)
+        ensure_runtime_schema()
+        logger.info("Database schemas initialized successfully.")
 except Exception as e:
     logger.error(f"Error initializing database schemas: {e}")
+    if settings.REQUIRE_POSTGRES:
+        raise
 
 # 2. Initialize FastAPI Application
 app = FastAPI(

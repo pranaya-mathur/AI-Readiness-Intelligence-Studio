@@ -24,13 +24,16 @@ services:
       dockerfile: Dockerfile
     container_name: aireadiness_backend
     ports:
-      - "8000:8000"
+      - "${BACKEND_HOST_PORT:-8000}:8000"
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-postgres}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
       - POSTGRES_DB=${POSTGRES_DB:-aireadiness}
       - POSTGRES_HOST=${POSTGRES_HOST:-db}
       - POSTGRES_PORT=${POSTGRES_PORT:-5432}
+      # Docker Compose always targets PostgreSQL — never silently fall back to SQLite.
+      - REQUIRE_POSTGRES=${REQUIRE_POSTGRES:-true}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+psycopg2://postgres:postgres@db:5432/aireadiness}
       - SECRET_KEY=${SECRET_KEY:-super-secret-key-change-in-production}
       - ENVIRONMENT=${ENVIRONMENT:-development}
       - USE_OLLAMA=${USE_OLLAMA:-false}
@@ -73,7 +76,7 @@ services:
       dockerfile: Dockerfile
     container_name: aireadiness_frontend
     ports:
-      - "3000:3000"
+      - "${FRONTEND_HOST_PORT:-3000}:3000"
     environment:
       - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}
     depends_on:

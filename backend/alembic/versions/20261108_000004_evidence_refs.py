@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
 
 revision = "20261108_000004"
@@ -17,13 +18,23 @@ branch_labels = None
 depends_on = None
 
 
+def _columns(table: str) -> set[str]:
+    bind = op.get_bind()
+    return {col["name"] for col in inspect(bind).get_columns(table)}
+
+
+def _add_column_if_missing(table: str, column: sa.Column) -> None:
+    if column.name not in _columns(table):
+        op.add_column(table, column)
+
+
 def upgrade() -> None:
-    op.add_column("process_bottlenecks", sa.Column("evidence_refs", sa.JSON(), nullable=True))
-    op.add_column("ai_use_cases", sa.Column("evidence_refs", sa.JSON(), nullable=True))
-    op.add_column("risk_registers", sa.Column("evidence_refs", sa.JSON(), nullable=True))
+    _add_column_if_missing("process_bottlenecks", sa.Column("evidence_refs", sa.JSON(), nullable=True))
+    _add_column_if_missing("ai_use_cases", sa.Column("evidence_refs", sa.JSON(), nullable=True))
+    _add_column_if_missing("risk_registers", sa.Column("evidence_refs", sa.JSON(), nullable=True))
 
 
 def downgrade() -> None:
-    op.drop_column("risk_registers", "evidence_refs")
-    op.drop_column("ai_use_cases", "evidence_refs")
-    op.drop_column("process_bottlenecks", "evidence_refs")
+    for table in ("risk_registers", "ai_use_cases", "process_bottlenecks"):
+        if "evidence_refs" in _columns(table):
+            op.drop_column(table, "evidence_refs")

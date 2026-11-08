@@ -24,10 +24,18 @@ def init_db():
             f"Attempting connection to PostgreSQL at {settings.POSTGRES_HOST}..."
         )
         postgres_url = settings.DATABASE_URL
-        engine = create_engine(postgres_url, connect_args={"connect_timeout": 3})
+        # Explicit connect_timeout only for libpq/psycopg2 drivers.
+        connect_args = {}
+        if "+psycopg2" in postgres_url or postgres_url.startswith("postgresql"):
+            connect_args = {"connect_timeout": 3}
+        engine = create_engine(postgres_url, connect_args=connect_args)
         # Test connection
         with engine.connect():
-            logger.info("Successfully connected to PostgreSQL database.")
+            logger.info(
+                "Successfully connected to database dialect=%s driver=%s",
+                engine.url.get_backend_name(),
+                engine.url.drivername,
+            )
         SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     except Exception as e:
         if settings.REQUIRE_POSTGRES:

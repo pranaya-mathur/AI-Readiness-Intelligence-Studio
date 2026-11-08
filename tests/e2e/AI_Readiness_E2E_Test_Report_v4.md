@@ -6,7 +6,7 @@ This report documents the fourth-stage (v4) end-to-end verification of the AI Re
 
 ## 1. Test Overview
 
-- **Test Pack Folder Path:** `/Users/mobcoderid-296/Desktop/AI Readiness Intelligence Studio/AI_Readiness_E2E_Test_Pack 2`
+- **Test Pack Folder Path:** `/Users/mobcoderid-296/Desktop/AI-Readiness-Intelligence-Studio/AI_Readiness_E2E_Test_Pack 2`
 - **Files Uploaded:**
   - `Apex_Client_Brief.docx` (DOCX)
   - `Apex_AI_Governance_Checklist.docx` (DOCX)
@@ -51,14 +51,14 @@ This report documents the fourth-stage (v4) end-to-end verification of the AI Re
 ## 3. Final Production Deliverables Generated
 
 1. **Standard Exports (Auto-Sanitized):**
-   - PDF: `apex_test_export.pdf` (`16072` bytes)
-   - DOCX: `apex_test_export.docx` (`40290` bytes)
-   - PPTX: `apex_test_export.pptx` (`35231` bytes)
+   - PDF: `apex_test_export.pdf` (`24602` bytes)
+   - DOCX: `apex_test_export.docx` (`41103` bytes)
+   - PPTX: `apex_test_export.pptx` (`35407` bytes)
 
 2. **Clean Showcase Exports (`?mode=showcase`):**
-   - PDF: `apex_showcase_export.pdf` (`16072` bytes)
-   - DOCX: `apex_showcase_export.docx` (`40290` bytes)
-   - PPTX: `apex_showcase_export.pptx` (`35231` bytes)
+   - PDF: `apex_showcase_export.pdf` (`24602` bytes)
+   - DOCX: `apex_showcase_export.docx` (`41103` bytes)
+   - PPTX: `apex_showcase_export.pptx` (`35407` bytes)
 
 ---
 
