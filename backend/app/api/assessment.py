@@ -226,6 +226,17 @@ def _db_assessment_to_dict(ass: Assessment) -> dict:
         "scoring_method": getattr(ass, "scoring_method", None),
         "dimension_score_details": getattr(ass, "dimension_score_details", None),
         "automation_potential_basis": getattr(ass, "automation_potential_basis", None),
+        "prioritization_rubric_version": getattr(
+            ass, "prioritization_rubric_version", None
+        ),
+        "financial_model_version": getattr(ass, "financial_model_version", None),
+        "investment_decision_status": getattr(ass, "investment_decision_status", None),
+        "investment_decision_explanation": getattr(
+            ass, "investment_decision_explanation", None
+        ),
+        "recommended_opportunity_id": getattr(ass, "recommended_opportunity_id", None),
+        "pilot_plan": getattr(ass, "pilot_plan", None),
+        "investment_package": getattr(ass, "investment_package", None),
         "analysis_mode": getattr(ass, "analysis_mode", None),
         "model_provider": getattr(ass, "model_provider", None),
         "model_name": getattr(ass, "model_name", None),
@@ -728,6 +739,23 @@ def upload_documents(
         )
 
         ass.status = "incomplete" if incomplete else "completed"
+        db.flush()
+        # Phase 2: deterministic investment intelligence over discovered use cases.
+        try:
+            from app.services.investment_persistence import (
+                build_and_persist_investment_package,
+            )
+
+            build_and_persist_investment_package(db, ass)
+        except Exception as invest_exc:
+            logger.error(f"Investment intelligence build failed: {invest_exc}")
+            # Do not fail Phase 1 analysis if Phase 2 package construction errors;
+            # surface via model_error note while keeping assessment results.
+            ass.model_error = (
+                (ass.model_error + " | " if ass.model_error else "")
+                + f"investment_intelligence_error: {invest_exc}"
+            )
+
         db.commit()
         db.refresh(ass)
 

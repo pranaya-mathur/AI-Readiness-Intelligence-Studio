@@ -17,7 +17,11 @@ class User(Base):
     organizations = relationship(
         "Organization", back_populates="owner", cascade="all, delete-orphan"
     )
-    assessments = relationship("Assessment", back_populates="user")
+    assessments = relationship(
+        "Assessment",
+        back_populates="user",
+        foreign_keys="[Assessment.user_id]",
+    )
 
 
 class Organization(Base):
@@ -129,8 +133,23 @@ class Assessment(Base):
         DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow
     )
 
+    # Phase 2: investment decision intelligence (additive)
+    prioritization_rubric_version = Column(String, nullable=True)
+    financial_model_version = Column(String, nullable=True)
+    investment_package = Column(JSON, nullable=True)
+    investment_decision_status = Column(
+        String, nullable=True
+    )  # invest | validate_first | defer | not_recommended | pending_review
+    investment_decision_explanation = Column(Text, nullable=True)
+    investment_decision_reviewer_id = Column(
+        Integer, ForeignKey("users.id"), nullable=True
+    )
+    investment_decision_at = Column(DateTime, nullable=True)
+    recommended_opportunity_id = Column(Integer, nullable=True)
+    pilot_plan = Column(JSON, nullable=True)
+
     # Relationships
-    user = relationship("User", back_populates="assessments")
+    user = relationship("User", back_populates="assessments", foreign_keys=[user_id])
     client = relationship("Client", back_populates="assessments")
     bottlenecks = relationship(
         "ProcessBottleneck", back_populates="assessment", cascade="all, delete-orphan"
@@ -146,6 +165,16 @@ class Assessment(Base):
     )
     extracted_signals = relationship(
         "DocumentSignal", back_populates="assessment", cascade="all, delete-orphan"
+    )
+    opportunity_evaluations = relationship(
+        "OpportunityEvaluation",
+        back_populates="assessment",
+        cascade="all, delete-orphan",
+    )
+    investment_review_events = relationship(
+        "InvestmentReviewEvent",
+        back_populates="assessment",
+        cascade="all, delete-orphan",
     )
 
 
@@ -239,3 +268,83 @@ class DocumentSignal(Base):
     evidence_id = Column(String, nullable=True)
 
     assessment = relationship("Assessment", back_populates="extracted_signals")
+
+
+class OpportunityEvaluation(Base):
+    """Phase 2 evaluated opportunity linked to a discovered AI use case."""
+
+    __tablename__ = "opportunity_evaluations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    assessment_id = Column(
+        Integer,
+        ForeignKey("assessments.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    use_case_id = Column(
+        Integer,
+        ForeignKey("ai_use_cases.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    department = Column(String, nullable=True)
+
+    criterion_scores = Column(JSON, nullable=True)
+    criterion_weights = Column(JSON, nullable=True)
+    original_criterion_scores = Column(JSON, nullable=True)
+    reviewed_criterion_scores = Column(JSON, nullable=True)
+    weighted_priority_score = Column(Float, nullable=True)
+    original_priority_score = Column(Float, nullable=True)
+    ranking = Column(Integer, nullable=True)
+    ranking_explanation = Column(Text, nullable=True)
+    evidence_refs = Column(JSON, nullable=True)
+    missing_information = Column(JSON, nullable=True)
+    confidence_class = Column(String, nullable=True)
+    recommendation_status = Column(String, nullable=True)
+    hard_blockers = Column(JSON, nullable=True)
+    is_blocked = Column(Integer, default=0)
+
+    feasibility = Column(JSON, nullable=True)
+    financial_inputs = Column(JSON, nullable=True)
+    original_financial_inputs = Column(JSON, nullable=True)
+    financial_evaluation = Column(JSON, nullable=True)
+    pilot_selected = Column(Integer, default=0)
+
+    prioritization_rubric_version = Column(String, nullable=True)
+    financial_model_version = Column(String, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(
+        DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow
+    )
+
+    assessment = relationship("Assessment", back_populates="opportunity_evaluations")
+
+
+class InvestmentReviewEvent(Base):
+    """Audit trail for human overrides of investment intelligence values."""
+
+    __tablename__ = "investment_review_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    assessment_id = Column(
+        Integer,
+        ForeignKey("assessments.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    opportunity_evaluation_id = Column(Integer, nullable=True, index=True)
+    reviewer_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    event_type = Column(String, nullable=False)
+    field_name = Column(String, nullable=True)
+    previous_value = Column(JSON, nullable=True)
+    new_value = Column(JSON, nullable=True)
+    reason = Column(Text, nullable=True)
+    prioritization_rubric_version = Column(String, nullable=True)
+    financial_model_version = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    assessment = relationship("Assessment", back_populates="investment_review_events")

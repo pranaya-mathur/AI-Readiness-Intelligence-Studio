@@ -584,6 +584,109 @@ class DocumentGenerators:
         }
 
     @staticmethod
+    def _investment_package(assessment: dict[str, Any]) -> dict[str, Any]:
+        return assessment.get("investment_package") or {}
+
+    @staticmethod
+    def _investment_intelligence_html(assessment: dict[str, Any]) -> str:
+        package = DocumentGenerators._investment_package(assessment)
+        opportunities = package.get("opportunities") or []
+        pilot = (
+            package.get("pilot_recommendation") or assessment.get("pilot_plan") or {}
+        )
+        decision = package.get("decision_summary") or {}
+        if not opportunities and not pilot:
+            return (
+                "<p style='font-size:9pt;color:#64748b;'>"
+                "Investment intelligence has not been generated for this assessment yet."
+                "</p>"
+            )
+
+        rows = []
+        for opp in opportunities:
+            finance = opp.get("financial_evaluation") or {}
+            base = (finance.get("scenarios") or {}).get("base") or {}
+            roi = base.get("roi_percentage")
+            invest = base.get("implementation_investment")
+            currency = finance.get("currency") or ""
+            if not finance.get("evaluation_complete"):
+                finance_cell = "Incomplete — baseline required"
+            else:
+                finance_cell = (
+                    f"{currency} {invest:,.0f}" if invest is not None else "n/a"
+                )
+                if roi is not None:
+                    finance_cell += f" | ROI {roi:.1f}%"
+            blockers = opp.get("hard_blockers") or []
+            block_txt = (
+                "; ".join(b.get("code", "") for b in blockers if isinstance(b, dict))
+                if blockers
+                else "None"
+            )
+            rows.append(
+                f"<tr>"
+                f"<td>{opp.get('ranking') if opp.get('ranking') is not None else '—'}</td>"
+                f"<td>{sanitize_text(opp.get('use_case_name') or opp.get('name'), 'Opportunity')}</td>"
+                f"<td>{opp.get('weighted_priority_score') if opp.get('weighted_priority_score') is not None else '—'}</td>"
+                f"<td>{sanitize_text(opp.get('recommendation_status'), 'n/a')}</td>"
+                f"<td>{sanitize_text((opp.get('feasibility') or {}).get('proposed_approach'), 'n/a')}</td>"
+                f"<td>{finance_cell}</td>"
+                f"<td>{sanitize_text(block_txt, 'None')}</td>"
+                f"</tr>"
+            )
+
+        metrics = pilot.get("success_metrics") or []
+        metric_html = "".join(
+            f"<li><strong>{sanitize_text(m.get('name'), 'Metric')}</strong>: "
+            f"baseline={sanitize_text(m.get('baseline'), 'n/a')}; "
+            f"target={sanitize_text(m.get('target'), 'n/a')}; "
+            f"pass/fail={sanitize_text(m.get('pass_fail_criteria'), 'n/a')}</li>"
+            for m in metrics
+            if isinstance(m, dict)
+        )
+        stages = pilot.get("stages") or []
+        stage_html = "".join(
+            f"<li><strong>{sanitize_text(s.get('name'), 'Stage')}</strong> — "
+            f"{sanitize_text(s.get('objective'), '')} "
+            f"(effort: {sanitize_text(s.get('estimated_effort_range'), 'range TBD')}; "
+            f"gate: {sanitize_text(s.get('decision_gate'), 'n/a')})</li>"
+            for s in stages
+            if isinstance(s, dict)
+        )
+
+        return f"""
+            <p style="font-size:9pt;color:#475569;margin-bottom:10px;">
+              Rubric {sanitize_text(package.get('prioritization_rubric_version') or assessment.get('prioritization_rubric_version'), 'n/a')}
+              · Financial model {sanitize_text(package.get('financial_model_version') or assessment.get('financial_model_version'), 'n/a')}
+              · Decision: <strong>{sanitize_text(decision.get('status') or assessment.get('investment_decision_status'), 'pending')}</strong>
+            </p>
+            <p style="font-size:9pt;color:#475569;margin-bottom:12px;">
+              {sanitize_text(decision.get('explanation') or assessment.get('investment_decision_explanation'), 'No investment decision recorded.')}
+            </p>
+            <table class="score-table">
+              <tr style="background:#f8fafc;">
+                <th>Rank</th><th>Opportunity</th><th>Priority</th><th>Status</th>
+                <th>Approach</th><th>Financial</th><th>Blockers</th>
+              </tr>
+              {''.join(rows) if rows else '<tr><td colspan="7" style="text-align:center;color:#64748b;">No evaluated opportunities.</td></tr>'}
+            </table>
+            <div style="margin-top:14px;">
+              <div style="font-weight:bold;color:#3b82f6;font-size:10pt;margin-bottom:4px;">Recommended Pilot</div>
+              <p style="font-size:9.5pt;"><strong>{sanitize_text(pilot.get('opportunity_name'), 'Not selected')}</strong></p>
+              <p style="font-size:8.5pt;color:#475569;">{sanitize_text(pilot.get('selection_rationale'), '')}</p>
+              <p style="font-size:8.5pt;color:#475569;"><strong>Investment:</strong> {sanitize_text(pilot.get('estimated_investment_label'), 'n/a')}</p>
+              <p style="font-size:8.5pt;color:#475569;"><strong>Time to value:</strong> {sanitize_text(pilot.get('time_to_value_label'), 'n/a')}</p>
+              <div style="font-weight:bold;font-size:9pt;margin-top:8px;">Success criteria</div>
+              <ul style="font-size:8.5pt;color:#334155;">{metric_html or '<li>Define after baseline measurement</li>'}</ul>
+              <div style="font-weight:bold;font-size:9pt;margin-top:8px;">Implementation roadmap</div>
+              <ul style="font-size:8.5pt;color:#334155;">{stage_html or '<li>Roadmap pending</li>'}</ul>
+            </div>
+            <p style="font-size:8pt;color:#64748b;margin-top:10px;">
+              Financial figures are shown only when baselines are provided. Missing inputs produce incomplete evaluations rather than fabricated ROI.
+            </p>
+        """
+
+    @staticmethod
     def generate_pdf_report(assessment: dict[str, Any]) -> io.BytesIO:
         """
         Generates a premium CSS-styled PDF report summarizing the assessment.
@@ -838,6 +941,11 @@ class DocumentGenerators:
                     '''
         }
                 </table>
+            </div>
+
+            <div class="section" style="page-break-before: always;">
+                <div class="section-title">Investment Intelligence</div>
+                {DocumentGenerators._investment_intelligence_html(assessment)}
             </div>
 
             <div class="section" style="page-break-before: always;">
@@ -1128,9 +1236,50 @@ class DocumentGenerators:
                 "No extracted signals were available. This proposal is based on assessment inputs and generated recommendations."
             )
 
-        # Section 4: Commercial Strategy
+        # Section 4: Investment Intelligence
+        h3_inv = doc.add_heading(level=1)
+        h3_inv_run = h3_inv.add_run("4. Investment Intelligence")
+        h3_inv_run.font.color.rgb = RGBColor(59, 130, 246)
+        package = DocumentGenerators._investment_package(assessment)
+        decision = package.get("decision_summary") or {}
+        doc.add_paragraph(
+            f"Decision: {decision.get('status') or assessment.get('investment_decision_status') or 'pending'}"
+        )
+        doc.add_paragraph(
+            decision.get("explanation")
+            or assessment.get("investment_decision_explanation")
+            or "No investment decision recorded."
+        )
+        for opp in package.get("opportunities") or []:
+            p = doc.add_paragraph(style="List Bullet")
+            rank = opp.get("ranking")
+            score = opp.get("weighted_priority_score")
+            finance = opp.get("financial_evaluation") or {}
+            base = (finance.get("scenarios") or {}).get("base") or {}
+            fin_txt = (
+                "financial evaluation incomplete"
+                if not finance.get("evaluation_complete")
+                else f"ROI={base.get('roi_percentage')}%, payback={base.get('payback_months')} mo"
+            )
+            p.add_run(
+                f"#{rank if rank is not None else '—'} "
+                f"{opp.get('use_case_name') or opp.get('name')} "
+                f"(priority={score}, status={opp.get('recommendation_status')}, {fin_txt})"
+            ).bold = False
+        pilot = (
+            package.get("pilot_recommendation") or assessment.get("pilot_plan") or {}
+        )
+        if pilot:
+            doc.add_paragraph().add_run("Recommended Pilot: ").bold = True
+            doc.add_paragraph(str(pilot.get("opportunity_name") or ""))
+            doc.add_paragraph(str(pilot.get("selection_rationale") or ""))
+            doc.add_paragraph(
+                f"Investment: {pilot.get('estimated_investment_label') or 'n/a'}"
+            )
+
+        # Section 5: Commercial Strategy
         h3_comm = doc.add_heading(level=1)
-        h3_comm_run = h3_comm.add_run("4. Commercial Strategy & Architecture Blueprint")
+        h3_comm_run = h3_comm.add_run("5. Commercial Strategy & Architecture Blueprint")
         h3_comm_run.font.color.rgb = RGBColor(59, 130, 246)
 
         comm = DocumentGenerators.calculate_commercial_strategy(assessment)
@@ -1329,7 +1478,38 @@ class DocumentGenerators:
             table.cell(idx + 1, 2).text = u.get("value", "High")
             table.cell(idx + 1, 3).text = u.get("priority", "P1")
 
-        # Slide 5: Commercial Strategy
+        # Slide 5: Investment Intelligence
+        slide = prs.slides.add_slide(slide_layout)
+        slide.shapes.title.text = "Investment Intelligence"
+        package = DocumentGenerators._investment_package(assessment)
+        txBox_inv = slide.shapes.add_textbox(
+            PtInches(0.8), PtInches(1.6), PtInches(8.4), PtInches(5.0)
+        )
+        tf_inv = txBox_inv.text_frame
+        decision = package.get("decision_summary") or {}
+        p_dec = tf_inv.paragraphs[0]
+        p_dec.text = f"Decision: {decision.get('status') or assessment.get('investment_decision_status') or 'pending'}"
+        p_dec.font.bold = True
+        p_dec.font.size = PtFont(14)
+        for opp in (package.get("opportunities") or [])[:5]:
+            p = tf_inv.add_paragraph()
+            p.text = (
+                f"#{opp.get('ranking') if opp.get('ranking') is not None else '—'} "
+                f"{opp.get('use_case_name') or opp.get('name')} — "
+                f"priority {opp.get('weighted_priority_score')} "
+                f"({opp.get('recommendation_status')})"
+            )
+            p.font.size = PtFont(12)
+        pilot = (
+            package.get("pilot_recommendation") or assessment.get("pilot_plan") or {}
+        )
+        if pilot:
+            p = tf_inv.add_paragraph()
+            p.text = f"Pilot: {pilot.get('opportunity_name')}"
+            p.font.bold = True
+            p.font.size = PtFont(13)
+
+        # Slide 6: Commercial Strategy
         slide = prs.slides.add_slide(slide_layout)
         slide.shapes.title.text = "Commercial Strategy Scoping"
         comm = DocumentGenerators.calculate_commercial_strategy(assessment)

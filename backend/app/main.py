@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.assessment import router as assessment_router
 from app.api.auth import router as auth_router
 from app.api.clients import router as clients_router
+from app.api.investment import router as investment_router
 from app.core.config import settings
 from app.core.database import Base, engine, ensure_runtime_schema, get_database_health
 
@@ -63,6 +64,11 @@ app.include_router(
 )
 app.include_router(
     assessment_router, prefix=f"{settings.API_V1_STR}/assessments", tags=["Assessments"]
+)
+app.include_router(
+    investment_router,
+    prefix=f"{settings.API_V1_STR}/assessments",
+    tags=["Investment Intelligence"],
 )
 
 

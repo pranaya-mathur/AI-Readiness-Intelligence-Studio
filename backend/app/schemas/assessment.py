@@ -272,6 +272,15 @@ class AssessmentResponse(BaseModel):
     evidence_package: dict | None = None
     insufficient_evidence: int | None = 0
 
+    # Phase 2 investment intelligence (additive, optional)
+    prioritization_rubric_version: str | None = None
+    financial_model_version: str | None = None
+    investment_decision_status: str | None = None
+    investment_decision_explanation: str | None = None
+    recommended_opportunity_id: int | None = None
+    pilot_plan: dict | None = None
+    investment_package: dict | None = None
+
     created_at: datetime
     updated_at: datetime
 

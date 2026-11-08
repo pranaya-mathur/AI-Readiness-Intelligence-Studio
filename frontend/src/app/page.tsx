@@ -132,6 +132,13 @@ interface Assessment {
   model_run_status?: string | null;
   insufficient_evidence?: number | null;
   automation_potential_basis?: string | null;
+  prioritization_rubric_version?: string | null;
+  financial_model_version?: string | null;
+  investment_decision_status?: string | null;
+  investment_decision_explanation?: string | null;
+  recommended_opportunity_id?: number | null;
+  pilot_plan?: Record<string, unknown> | null;
+  investment_package?: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
   bottlenecks: Bottleneck[];
@@ -140,6 +147,73 @@ interface Assessment {
   roadmap_items: RoadmapItem[];
   extracted_signals: ExtractedSignal[];
   client: ClientWorkspace | null;
+}
+
+interface InvestmentOpportunity {
+  id?: number;
+  use_case_id?: number | null;
+  name?: string;
+  use_case_name?: string;
+  description?: string | null;
+  department?: string | null;
+  ranking?: number | null;
+  weighted_priority_score?: number | null;
+  ranking_explanation?: string | null;
+  recommendation_status?: string | null;
+  confidence_class?: string | null;
+  is_blocked?: boolean;
+  hard_blockers?: Array<{ code?: string; description?: string }>;
+  missing_information?: string[];
+  criterion_scores?: Record<string, { score?: number; weight?: number; basis?: string }>;
+  feasibility?: {
+    proposed_approach?: string;
+    approach_rationale?: string;
+    prerequisites?: string[];
+    major_risks?: string[];
+    score?: number;
+  };
+  financial_inputs?: Record<string, unknown>;
+  financial_evaluation?: {
+    evaluation_complete?: boolean;
+    incomplete_message?: string | null;
+    illustrative?: boolean;
+    currency?: string;
+    scenarios?: Record<string, {
+      roi_percentage?: number | null;
+      payback_months?: number | null;
+      net_annual_savings?: number | null;
+      implementation_investment?: number | null;
+      gross_annual_savings?: number | null;
+      current_baseline_annual_cost?: number | null;
+    }>;
+    sensitivity?: Array<{
+      parameter?: string;
+      delta_pct?: number;
+      resulting_roi_pct?: number | null;
+    }>;
+  };
+  pilot_selected?: boolean;
+}
+
+interface InvestmentPackage {
+  opportunities?: InvestmentOpportunity[];
+  pilot_recommendation?: {
+    opportunity_name?: string;
+    selection_rationale?: string;
+    estimated_investment_label?: string;
+    time_to_value_label?: string;
+    success_metrics?: Array<Record<string, string>>;
+    stages?: Array<Record<string, unknown>>;
+    missing_information?: string[];
+  } | null;
+  decision_summary?: {
+    status?: string | null;
+    explanation?: string | null;
+    missing_evidence?: string[];
+  };
+  prioritization_rubric_version?: string | null;
+  financial_model_version?: string | null;
+  review_events?: Array<Record<string, unknown>>;
 }
 
 interface AuthTokenResponse {
@@ -156,8 +230,24 @@ export default function Home() {
   const [token, setToken] = useState("");
 
   const [activeTab, setActiveTab] = useState("dashboard"); // dashboard, intake, upload, insights
-  const [insightsSubTab, setInsightsSubTab] = useState("summary"); // summary, bottlenecks, opportunity, matrix, scoring, risks, pilot, roadmap, export, commercial
+  const [insightsSubTab, setInsightsSubTab] = useState("summary"); // summary, bottlenecks, opportunity, matrix, scoring, risks, pilot, roadmap, export, commercial, investment
   const [activeArchLayer, setActiveArchLayer] = useState("systems");
+  const [investmentPackage, setInvestmentPackage] = useState<InvestmentPackage | null>(null);
+  const [selectedOpportunityId, setSelectedOpportunityId] = useState<number | null>(null);
+  const [financeDraft, setFinanceDraft] = useState({
+    monthly_volume: "",
+    effort_minutes_per_transaction: "",
+    loaded_hourly_cost: "",
+    automation_rate: "",
+    adoption_rate: "",
+    implementation_cost: "",
+    integration_cost: "",
+    cloud_llm_monthly_cost: "",
+    currency: "USD",
+  });
+  const [investmentBusy, setInvestmentBusy] = useState(false);
+  const [investmentMessage, setInvestmentMessage] = useState("");
+  const [decisionDraft, setDecisionDraft] = useState({ status: "validate_first", explanation: "" });
   
   const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [clients, setClients] = useState<ClientWorkspace[]>([]);
@@ -595,6 +685,146 @@ export default function Home() {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const applyInvestmentPackage = (pkg: InvestmentPackage) => {
+    setInvestmentPackage(pkg);
+    const opps = pkg.opportunities || [];
+    const selected =
+      opps.find((o) => o.pilot_selected) ||
+      opps.find((o) => o.ranking === 1) ||
+      opps[0];
+    setSelectedOpportunityId(selected?.id ?? null);
+    const inputs = (selected?.financial_inputs || {}) as Record<string, unknown>;
+    setFinanceDraft({
+      monthly_volume: inputs.monthly_volume != null ? String(inputs.monthly_volume) : "",
+      effort_minutes_per_transaction:
+        inputs.effort_minutes_per_transaction != null
+          ? String(inputs.effort_minutes_per_transaction)
+          : "",
+      loaded_hourly_cost:
+        inputs.loaded_hourly_cost != null ? String(inputs.loaded_hourly_cost) : "",
+      automation_rate: inputs.automation_rate != null ? String(inputs.automation_rate) : "",
+      adoption_rate: inputs.adoption_rate != null ? String(inputs.adoption_rate) : "",
+      implementation_cost:
+        inputs.implementation_cost != null ? String(inputs.implementation_cost) : "",
+      integration_cost:
+        inputs.integration_cost != null ? String(inputs.integration_cost) : "",
+      cloud_llm_monthly_cost:
+        inputs.cloud_llm_monthly_cost != null ? String(inputs.cloud_llm_monthly_cost) : "",
+      currency: String(inputs.currency || "USD"),
+    });
+    setDecisionDraft({
+      status: pkg.decision_summary?.status || "validate_first",
+      explanation: pkg.decision_summary?.explanation || "",
+    });
+  };
+
+  const loadInvestmentIntelligence = useCallback(async (assessmentId: number) => {
+    setInvestmentBusy(true);
+    setInvestmentMessage("");
+    try {
+      const res = await fetch(
+        `${API_BASE}/assessments/${assessmentId}/investment-intelligence`,
+        { headers: getAuthHeaders() }
+      );
+      if (!res.ok) {
+        throw new Error(await parseErrorMessage(res, "Could not load investment intelligence"));
+      }
+      const pkg: InvestmentPackage = await res.json();
+      applyInvestmentPackage(pkg);
+    } catch (err) {
+      console.error(err);
+      setInvestmentMessage(err instanceof Error ? err.message : "Investment load failed");
+    } finally {
+      setInvestmentBusy(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    if (insightsSubTab === "investment" && selectedAssessment?.id) {
+      loadInvestmentIntelligence(selectedAssessment.id);
+    }
+  }, [insightsSubTab, selectedAssessment?.id, loadInvestmentIntelligence]);
+
+  const saveOpportunityFinancials = async () => {
+    if (!selectedAssessment || !selectedOpportunityId) return;
+    setInvestmentBusy(true);
+    setInvestmentMessage("");
+    try {
+      const financial_inputs: Record<string, unknown> = {
+        currency: financeDraft.currency || "USD",
+        provenance: {
+          monthly_volume: "client_provided_estimate",
+          effort_minutes_per_transaction: "client_provided_estimate",
+          loaded_hourly_cost: "consultant_assumption",
+          automation_rate: "consultant_assumption",
+          adoption_rate: "consultant_assumption",
+          implementation_cost: "consultant_assumption",
+          integration_cost: "consultant_assumption",
+          cloud_llm_monthly_cost: "consultant_assumption",
+        },
+      };
+      (
+        [
+          "monthly_volume",
+          "effort_minutes_per_transaction",
+          "loaded_hourly_cost",
+          "automation_rate",
+          "adoption_rate",
+          "implementation_cost",
+          "integration_cost",
+          "cloud_llm_monthly_cost",
+        ] as const
+      ).forEach((key) => {
+        const raw = financeDraft[key];
+        if (raw !== "") financial_inputs[key] = Number(raw);
+      });
+      const res = await fetch(
+        `${API_BASE}/assessments/${selectedAssessment.id}/investment-intelligence/opportunities/${selectedOpportunityId}/financials`,
+        {
+          method: "PUT",
+          headers: getAuthHeaders(true),
+          body: JSON.stringify({
+            financial_inputs,
+            reason: "Updated financial assumptions from Investment Intelligence panel",
+          }),
+        }
+      );
+      if (!res.ok) {
+        throw new Error(await parseErrorMessage(res, "Could not recalculate financials"));
+      }
+      applyInvestmentPackage(await res.json());
+      setInvestmentMessage("Financial model recalculated from updated assumptions.");
+    } catch (err) {
+      setInvestmentMessage(err instanceof Error ? err.message : "Financial update failed");
+    } finally {
+      setInvestmentBusy(false);
+    }
+  };
+
+  const saveInvestmentDecision = async () => {
+    if (!selectedAssessment) return;
+    setInvestmentBusy(true);
+    try {
+      const res = await fetch(
+        `${API_BASE}/assessments/${selectedAssessment.id}/investment-intelligence/decision`,
+        {
+          method: "PUT",
+          headers: getAuthHeaders(true),
+          body: JSON.stringify(decisionDraft),
+        }
+      );
+      if (!res.ok) {
+        throw new Error(await parseErrorMessage(res, "Could not save investment decision"));
+      }
+      applyInvestmentPackage(await res.json());
+      setInvestmentMessage("Investment decision recorded with reviewer audit trail.");
+    } catch (err) {
+      setInvestmentMessage(err instanceof Error ? err.message : "Decision save failed");
+    } finally {
+      setInvestmentBusy(false);
     }
   };
 
@@ -1795,6 +2025,7 @@ export default function Home() {
                 { id: "pilot", label: "Recommended Pilot", icon: Sparkles },
                 { id: "roadmap", label: "90-Day Roadmap", icon: Calendar },
                 { id: "commercial", label: "Commercial Strategy", icon: Coins },
+                { id: "investment", label: "Investment Intelligence", icon: TrendingUp },
                 { id: "export", label: "Strategy Asset Generator", icon: Download }
               ].map(sub => {
                 const active = insightsSubTab === sub.id;
@@ -2903,6 +3134,246 @@ export default function Home() {
                         </div>
                       </div>
 
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {insightsSubTab === "investment" && (() => {
+                const opps = investmentPackage?.opportunities || [];
+                const selected =
+                  opps.find((o) => o.id === selectedOpportunityId) || opps[0] || null;
+                const finance = selected?.financial_evaluation;
+                const base = finance?.scenarios?.base;
+                const pilot = investmentPackage?.pilot_recommendation;
+                const decision = investmentPackage?.decision_summary;
+                return (
+                  <div className="space-y-6 animate-fade-in">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <h3 className="text-base font-bold flex items-center gap-2">
+                          <TrendingUp className="w-5 h-5 text-blue-500" />
+                          <span>Investment Intelligence</span>
+                        </h3>
+                        <p className="text-xs text-slate-400 mt-1">
+                          Deterministic opportunity ranking, financial feasibility, pilot recommendation, and investment decision.
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => selectedAssessment && loadInvestmentIntelligence(selectedAssessment.id)}
+                        className="text-[10px] px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-900"
+                        disabled={investmentBusy}
+                      >
+                        {investmentBusy ? "Loading…" : "Refresh"}
+                      </button>
+                    </div>
+
+                    {investmentMessage && (
+                      <div className="text-xs text-amber-300 bg-amber-950/30 border border-amber-500/20 rounded-lg px-3 py-2">
+                        {investmentMessage}
+                      </div>
+                    )}
+
+                    <div className="glass-panel p-4 rounded-2xl grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div>
+                        <div className="text-[10px] uppercase text-slate-500 font-bold">Decision</div>
+                        <div className="text-sm font-bold text-slate-100 mt-1">{decision?.status || "pending"}</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] uppercase text-slate-500 font-bold">Prioritization rubric</div>
+                        <div className="text-sm font-bold text-slate-100 mt-1">{investmentPackage?.prioritization_rubric_version || "—"}</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] uppercase text-slate-500 font-bold">Financial model</div>
+                        <div className="text-sm font-bold text-slate-100 mt-1">{investmentPackage?.financial_model_version || "—"}</div>
+                      </div>
+                      <p className="md:col-span-3 text-xs text-slate-400">{decision?.explanation || "No decision explanation yet."}</p>
+                    </div>
+
+                    <div className="glass-panel p-4 rounded-2xl overflow-x-auto">
+                      <h4 className="text-xs font-extrabold text-slate-300 uppercase tracking-widest mb-3">Opportunity Portfolio</h4>
+                      <table className="w-full text-left text-xs">
+                        <thead className="text-slate-500">
+                          <tr>
+                            <th className="py-2 pr-2">Rank</th>
+                            <th className="py-2 pr-2">Opportunity</th>
+                            <th className="py-2 pr-2">Priority</th>
+                            <th className="py-2 pr-2">Feasibility</th>
+                            <th className="py-2 pr-2">Investment</th>
+                            <th className="py-2 pr-2">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {opps.map((opp) => {
+                            const inv = opp.financial_evaluation?.scenarios?.base?.implementation_investment;
+                            const complete = opp.financial_evaluation?.evaluation_complete;
+                            return (
+                              <tr
+                                key={opp.id || opp.use_case_name}
+                                className={`border-t border-slate-800 cursor-pointer hover:bg-slate-900/50 ${selectedOpportunityId === opp.id ? "bg-blue-950/20" : ""}`}
+                                onClick={() => {
+                                  setSelectedOpportunityId(opp.id ?? null);
+                                  const inputs = (opp.financial_inputs || {}) as Record<string, unknown>;
+                                  setFinanceDraft({
+                                    monthly_volume: inputs.monthly_volume != null ? String(inputs.monthly_volume) : "",
+                                    effort_minutes_per_transaction: inputs.effort_minutes_per_transaction != null ? String(inputs.effort_minutes_per_transaction) : "",
+                                    loaded_hourly_cost: inputs.loaded_hourly_cost != null ? String(inputs.loaded_hourly_cost) : "",
+                                    automation_rate: inputs.automation_rate != null ? String(inputs.automation_rate) : "",
+                                    adoption_rate: inputs.adoption_rate != null ? String(inputs.adoption_rate) : "",
+                                    implementation_cost: inputs.implementation_cost != null ? String(inputs.implementation_cost) : "",
+                                    integration_cost: inputs.integration_cost != null ? String(inputs.integration_cost) : "",
+                                    cloud_llm_monthly_cost: inputs.cloud_llm_monthly_cost != null ? String(inputs.cloud_llm_monthly_cost) : "",
+                                    currency: String(inputs.currency || "USD"),
+                                  });
+                                }}
+                              >
+                                <td className="py-2 pr-2">{opp.ranking ?? "—"}</td>
+                                <td className="py-2 pr-2 font-semibold text-slate-200">{opp.use_case_name || opp.name}</td>
+                                <td className="py-2 pr-2">{opp.weighted_priority_score ?? "—"}</td>
+                                <td className="py-2 pr-2">{opp.feasibility?.proposed_approach || "—"}</td>
+                                <td className="py-2 pr-2">{complete ? `${opp.financial_evaluation?.currency || ""} ${inv?.toLocaleString() ?? "n/a"}` : "Incomplete"}</td>
+                                <td className="py-2 pr-2">{opp.is_blocked ? "blocked" : opp.recommendation_status}</td>
+                              </tr>
+                            );
+                          })}
+                          {!opps.length && (
+                            <tr>
+                              <td colSpan={6} className="py-4 text-slate-500 text-center">
+                                No evaluated opportunities yet. Run document analysis first.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {selected && (
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        <div className="glass-panel p-4 rounded-2xl space-y-3">
+                          <h4 className="text-xs font-extrabold text-slate-300 uppercase tracking-widest">Opportunity Detail</h4>
+                          <p className="text-sm font-bold text-slate-100">{selected.use_case_name || selected.name}</p>
+                          <p className="text-xs text-slate-400">{selected.ranking_explanation}</p>
+                          <p className="text-xs text-slate-300">{selected.feasibility?.approach_rationale}</p>
+                          {(selected.hard_blockers || []).length > 0 && (
+                            <div className="text-xs text-red-300 bg-red-950/20 border border-red-500/20 rounded-lg p-2">
+                              Blockers: {(selected.hard_blockers || []).map((b) => b.description || b.code).join("; ")}
+                            </div>
+                          )}
+                          {(selected.missing_information || []).length > 0 && (
+                            <div className="text-[10px] text-amber-200">
+                              Missing: {(selected.missing_information || []).slice(0, 6).join(" · ")}
+                            </div>
+                          )}
+                          <div className="grid grid-cols-2 gap-2">
+                            {Object.entries(selected.criterion_scores || {}).map(([key, meta]) => (
+                              <div key={key} className="bg-slate-950/50 border border-slate-800 rounded-lg p-2">
+                                <div className="text-[9px] uppercase text-slate-500">{key.split("_").join(" ")}</div>
+                                <div className="text-xs font-bold text-slate-200">{meta.score ?? "—"}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="glass-panel p-4 rounded-2xl space-y-3">
+                          <h4 className="text-xs font-extrabold text-slate-300 uppercase tracking-widest">Financial Model</h4>
+                          {!finance?.evaluation_complete && (
+                            <p className="text-xs text-amber-300">
+                              {finance?.incomplete_message || "Financial evaluation incomplete — additional baseline information required."}
+                            </p>
+                          )}
+                          <div className="grid grid-cols-2 gap-2">
+                            {Object.entries(financeDraft).map(([key, value]) => (
+                              <label key={key} className="text-[10px] text-slate-400 space-y-1">
+                                <span className="block uppercase tracking-wide">{key.split("_").join(" ")}</span>
+                                <input
+                                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-slate-200"
+                                  value={value}
+                                  onChange={(e) => setFinanceDraft((prev) => ({ ...prev, [key]: e.target.value }))}
+                                />
+                              </label>
+                            ))}
+                          </div>
+                          <button
+                            onClick={saveOpportunityFinancials}
+                            disabled={investmentBusy || !isReviewMode}
+                            className="text-xs px-3 py-2 rounded-lg bg-blue-600 text-white font-bold disabled:opacity-40"
+                          >
+                            Recalculate ROI
+                          </button>
+                          {!isReviewMode && (
+                            <p className="text-[10px] text-slate-500">Enable Human Review Mode to edit assumptions.</p>
+                          )}
+                          {finance?.evaluation_complete && base && (
+                            <div className="grid grid-cols-2 gap-2 text-xs">
+                              <div className="bg-slate-950/60 rounded-lg p-2">ROI (base): <strong>{base.roi_percentage ?? "n/a"}%</strong></div>
+                              <div className="bg-slate-950/60 rounded-lg p-2">Payback: <strong>{base.payback_months ?? "n/a"} mo</strong></div>
+                              <div className="bg-slate-950/60 rounded-lg p-2">Net annual: <strong>{base.net_annual_savings?.toLocaleString() ?? "n/a"}</strong></div>
+                              <div className="bg-slate-950/60 rounded-lg p-2">Investment: <strong>{base.implementation_investment?.toLocaleString() ?? "n/a"}</strong></div>
+                            </div>
+                          )}
+                          {(finance?.sensitivity || []).length > 0 && (
+                            <div className="text-[10px] text-slate-400 max-h-28 overflow-y-auto">
+                              Sensitivity: {(finance?.sensitivity || []).slice(0, 8).map((s, idx) => (
+                                <div key={idx}>{s.parameter} {s.delta_pct}% → ROI {s.resulting_roi_pct ?? "n/a"}%</div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      <div className="glass-panel p-4 rounded-2xl space-y-2">
+                        <h4 className="text-xs font-extrabold text-slate-300 uppercase tracking-widest">Pilot Recommendation</h4>
+                        <p className="text-sm font-bold text-slate-100">{pilot?.opportunity_name || "Not selected"}</p>
+                        <p className="text-xs text-slate-400">{pilot?.selection_rationale}</p>
+                        <p className="text-xs text-slate-300">{pilot?.estimated_investment_label}</p>
+                        <p className="text-xs text-slate-300">{pilot?.time_to_value_label}</p>
+                        <div className="space-y-1">
+                          {(pilot?.success_metrics || []).map((m, idx) => (
+                            <div key={idx} className="text-[10px] text-slate-400 border border-slate-800 rounded-lg p-2">
+                              <strong className="text-slate-200">{m.name}</strong>: {m.baseline} → {m.target}
+                            </div>
+                          ))}
+                        </div>
+                        <div className="space-y-1 max-h-40 overflow-y-auto">
+                          {(pilot?.stages || []).map((s, idx) => (
+                            <div key={idx} className="text-[10px] text-slate-400">
+                              <strong className="text-slate-300">{String(s.name)}</strong> — {String(s.objective || "")}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="glass-panel p-4 rounded-2xl space-y-3">
+                        <h4 className="text-xs font-extrabold text-slate-300 uppercase tracking-widest">Decision Summary</h4>
+                        <select
+                          className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-2 text-xs text-slate-200"
+                          value={decisionDraft.status}
+                          disabled={!isReviewMode}
+                          onChange={(e) => setDecisionDraft((prev) => ({ ...prev, status: e.target.value }))}
+                        >
+                          <option value="invest">Invest</option>
+                          <option value="validate_first">Validate First</option>
+                          <option value="defer">Defer</option>
+                          <option value="not_recommended">Not Recommended</option>
+                          <option value="pending_review">Pending Review</option>
+                        </select>
+                        <textarea
+                          className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-2 text-xs text-slate-200 min-h-24"
+                          disabled={!isReviewMode}
+                          value={decisionDraft.explanation}
+                          onChange={(e) => setDecisionDraft((prev) => ({ ...prev, explanation: e.target.value }))}
+                          placeholder="Explain the investment decision and any missing evidence"
+                        />
+                        <button
+                          onClick={saveInvestmentDecision}
+                          disabled={investmentBusy || !isReviewMode || decisionDraft.explanation.trim().length < 3}
+                          className="text-xs px-3 py-2 rounded-lg bg-emerald-600 text-white font-bold disabled:opacity-40"
+                        >
+                          Record Decision
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );
