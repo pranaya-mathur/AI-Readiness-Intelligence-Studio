@@ -178,7 +178,9 @@ def list_members(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    require_org_permission(db, current_user, organization_id, PERM_ASSESSMENT_READ)
+    # Full membership directory (emails + client assignments) is internal-admin only.
+    # Client viewers and other external roles must not enumerate unrelated members.
+    require_org_permission(db, current_user, organization_id, PERM_MEMBER_MANAGE)
     rows = (
         db.query(OrganizationMembership, User)
         .join(User, User.id == OrganizationMembership.user_id)
@@ -352,8 +354,9 @@ def agency_engagements(
     can_notes = has_permission(membership.role, PERM_VIEW_CONSULTANT_NOTES)
     rows = []
     for client in clients:
-        if membership.role == ROLE_CLIENT_VIEWER and not client_is_authorized_for_membership(
-            membership, client.id
+        if (
+            membership.role == ROLE_CLIENT_VIEWER
+            and not client_is_authorized_for_membership(membership, client.id)
         ):
             continue
         assessment_count = (
@@ -375,7 +378,9 @@ def agency_engagements(
                     or (client.fee_estimate or {}).get("implementation_fee") is not None
                 ),
                 "assessment_count": assessment_count,
-                "updated_at": client.updated_at.isoformat() if client.updated_at else None,
+                "updated_at": client.updated_at.isoformat()
+                if client.updated_at
+                else None,
             }
         )
     return {
@@ -507,15 +512,18 @@ def generate_proposal_sow(
     if ass.client_id:
         client = db.query(Client).filter(Client.id == ass.client_id).first()
     if not client:
-        raise HTTPException(status_code=400, detail="Client engagement required for proposal/SOW")
+        raise HTTPException(
+            status_code=400, detail="Client engagement required for proposal/SOW"
+        )
 
     workflow = (ass.workflow_status or "").lower()
     deliverable_locked = bool(getattr(ass, "proposal_locked", 0)) or workflow in {
         "approved",
         "delivered",
     }
+    reopen_reason = payload.reason if payload else None
     if deliverable_locked:
-        if not (payload and payload.reason):
+        if not reopen_reason:
             raise HTTPException(
                 status_code=409,
                 detail=(
@@ -528,10 +536,17 @@ def generate_proposal_sow(
         )
         ass.proposal_locked = 0
 
+    # Capture issued packages before any fee/package mutation for immutable history.
+    prior_proposal = getattr(ass, "proposal_package", None)
+    prior_sow = getattr(ass, "sow_package", None)
+    prior_fee = getattr(ass, "fee_estimate", None)
+    prior_approved_at = getattr(ass, "proposal_approved_at", None)
+    was_issued = bool(deliverable_locked or prior_approved_at or reopen_reason)
+
     fee_estimate = (
         payload.fee_estimate
         if payload and payload.fee_estimate is not None
-        else getattr(ass, "fee_estimate", None)
+        else prior_fee
     )
     if payload and payload.fee_estimate is not None:
         ass.fee_estimate = payload.fee_estimate
@@ -545,7 +560,9 @@ def generate_proposal_sow(
             None,
         )
     if selected is None and opportunities:
-        selected = next((o for o in opportunities if o.get("ranking") == 1), opportunities[0])
+        selected = next(
+            (o for o in opportunities if o.get("ranking") == 1), opportunities[0]
+        )
 
     result = build_proposal_and_sow(
         organization={"name": org.name, "id": org.id},
@@ -581,6 +598,26 @@ def generate_proposal_sow(
     proposal["client_id"] = client.id
     sow["assessment_id"] = ass.id
     sow["client_id"] = client.id
+
+    if was_issued and (prior_proposal or prior_sow):
+        history = list(getattr(ass, "proposal_revision_history", None) or [])
+        history.append(
+            {
+                "revision": len(history) + 1,
+                "immutable": True,
+                "archived_at": datetime.datetime.utcnow().isoformat() + "Z",
+                "reason": reopen_reason or "Regenerated after prior issuance",
+                "workflow_status_at_archive": ass.workflow_status,
+                "proposal_approved_at": (
+                    prior_approved_at.isoformat() + "Z" if prior_approved_at else None
+                ),
+                "proposal_package": prior_proposal,
+                "sow_package": prior_sow,
+                "fee_estimate": prior_fee,
+            }
+        )
+        ass.proposal_revision_history = history
+
     ass.proposal_package = proposal
     ass.sow_package = sow
     if ass.workflow_status not in {"delivered", "approved"}:
@@ -602,6 +639,7 @@ def generate_proposal_sow(
         "assessment_id": ass.id,
         "client_id": client.id,
         "proposal_locked": bool(ass.proposal_locked),
+        "revision_count": len(getattr(ass, "proposal_revision_history", None) or []),
         "complete": result.get("complete"),
         "missing_information": result.get("missing_information"),
     }
@@ -617,7 +655,9 @@ def get_proposal_sow(
         db, current_user, assessment_id, permission=PERM_ASSESSMENT_READ
     )
     if not ass.client_id:
-        raise HTTPException(status_code=404, detail="No client engagement on assessment")
+        raise HTTPException(
+            status_code=404, detail="No client engagement on assessment"
+        )
     client = db.query(Client).filter(Client.id == ass.client_id).first()
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
@@ -659,5 +699,6 @@ def get_proposal_sow(
         "assessment_id": ass.id,
         "client_id": client.id,
         "proposal_locked": bool(getattr(ass, "proposal_locked", 0)),
+        "revision_history": getattr(ass, "proposal_revision_history", None) or [],
         "complete": bool(proposal and sow),
     }

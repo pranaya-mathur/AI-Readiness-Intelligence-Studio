@@ -67,9 +67,7 @@ def _get_owned_assessment(
     *,
     permission: str = PERM_ASSESSMENT_READ,
 ) -> Assessment:
-    ass = get_accessible_assessment(
-        db, user, assessment_id, permission=permission
-    )
+    ass = get_accessible_assessment(db, user, assessment_id, permission=permission)
     if getattr(ass, "locked_for_delivery", 0) and permission != PERM_ASSESSMENT_READ:
         raise HTTPException(
             status_code=409,

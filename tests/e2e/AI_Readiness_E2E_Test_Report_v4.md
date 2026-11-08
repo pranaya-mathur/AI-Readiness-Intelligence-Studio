@@ -51,14 +51,14 @@ This report documents the fourth-stage (v4) end-to-end verification of the AI Re
 ## 3. Final Production Deliverables Generated
 
 1. **Standard Exports (Auto-Sanitized):**
-   - PDF: `apex_test_export.pdf` (`28200` bytes)
-   - DOCX: `apex_test_export.docx` (`41333` bytes)
-   - PPTX: `apex_test_export.pptx` (`36448` bytes)
+   - PDF: `apex_test_export.pdf` (`28096` bytes)
+   - DOCX: `apex_test_export.docx` (`41255` bytes)
+   - PPTX: `apex_test_export.pptx` (`36376` bytes)
 
 2. **Clean Showcase Exports (`?mode=showcase`):**
-   - PDF: `apex_showcase_export.pdf` (`28200` bytes)
-   - DOCX: `apex_showcase_export.docx` (`41333` bytes)
-   - PPTX: `apex_showcase_export.pptx` (`36448` bytes)
+   - PDF: `apex_showcase_export.pdf` (`28096` bytes)
+   - DOCX: `apex_showcase_export.docx` (`41255` bytes)
+   - PPTX: `apex_showcase_export.pptx` (`36376` bytes)
 
 ---
 

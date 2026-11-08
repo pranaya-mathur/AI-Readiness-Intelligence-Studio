@@ -49,9 +49,15 @@ class Settings(BaseSettings):
         if database_url_override:
             # Normalize bare postgresql:// to psycopg2 so SQLAlchemy does not require psycopg v3.
             if database_url_override.startswith("postgresql://"):
-                return "postgresql+psycopg2://" + database_url_override[len("postgresql://") :]
+                return (
+                    "postgresql+psycopg2://"
+                    + database_url_override[len("postgresql://") :]
+                )
             if database_url_override.startswith("postgres://"):
-                return "postgresql+psycopg2://" + database_url_override[len("postgres://") :]
+                return (
+                    "postgresql+psycopg2://"
+                    + database_url_override[len("postgres://") :]
+                )
             return database_url_override
         return (
             f"postgresql+psycopg2://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"

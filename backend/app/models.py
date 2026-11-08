@@ -67,7 +67,10 @@ class OrganizationMembership(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     organization_id = Column(
-        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+        Integer,
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     user_id = Column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
@@ -134,11 +137,15 @@ class Assessment(Base):
     workflow_status = Column(String, nullable=True, default="draft")
     locked_for_delivery = Column(Integer, default=0)
     workflow_approved_at = Column(DateTime, nullable=True)
-    workflow_approved_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    workflow_approved_by_user_id = Column(
+        Integer, ForeignKey("users.id"), nullable=True
+    )
     # Proposal/SOW bound to this assessment (not shared across sibling engagements).
     proposal_package = Column(JSON, nullable=True)
     sow_package = Column(JSON, nullable=True)
     fee_estimate = Column(JSON, nullable=True)
+    # Immutable snapshots of previously approved/issued proposal+SOW packages.
+    proposal_revision_history = Column(JSON, nullable=True)
     proposal_locked = Column(Integer, default=0)
     proposal_approved_at = Column(DateTime, nullable=True)
     industry = Column(String, nullable=True)

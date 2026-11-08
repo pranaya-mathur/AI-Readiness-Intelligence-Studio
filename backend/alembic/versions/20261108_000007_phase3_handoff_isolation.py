@@ -7,7 +7,8 @@ Create Date: 2026-11-08
 
 from __future__ import annotations
 
-from typing import Sequence, Union
+import json
+from typing import Any, Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
@@ -32,6 +33,34 @@ def _add_column_if_missing(table: str, column: sa.Column) -> None:
         op.add_column(table, column)
 
 
+def _as_json_param(value: Any) -> Any:
+    """Serialize dict/list for dialect-safe JSON binds (Postgres + SQLite)."""
+    if value is None:
+        return None
+    if isinstance(value, (dict, list)):
+        return json.dumps(value)
+    if isinstance(value, (bytes, bytearray)):
+        return value.decode("utf-8")
+    if isinstance(value, str):
+        # Already JSON text from SQLite JSON affinity — keep as-is.
+        return value
+    return json.dumps(value)
+
+
+def _as_mapping(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return value
+        return dict(parsed) if isinstance(parsed, dict) else parsed
+    return value
+
+
 def upgrade() -> None:
     _add_column_if_missing(
         "organization_memberships",
@@ -46,18 +75,24 @@ def upgrade() -> None:
     ):
         _add_column_if_missing("assessments", col)
 
-    # Soft backfill via ORM so JSON works on SQLite and Postgres.
+    # Soft backfill via SQL text so JSON works on SQLite and Postgres.
+    # Postgres/psycopg2 cannot adapt raw Python dicts in text() binds.
     bind = op.get_bind()
     session = Session(bind=bind)
+    dialect = bind.dialect.name
     try:
-        clients = session.execute(
-            sa.text(
-                "SELECT id, proposal_package, sow_package, fee_estimate FROM clients"
+        clients = (
+            session.execute(
+                sa.text(
+                    "SELECT id, proposal_package, sow_package, fee_estimate FROM clients"
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         for row in clients:
-            proposal = row["proposal_package"]
-            sow = row["sow_package"]
+            proposal = _as_mapping(row["proposal_package"])
+            sow = _as_mapping(row["sow_package"])
             fee = row["fee_estimate"]
             if not proposal and not sow:
                 continue
@@ -79,19 +114,38 @@ def upgrade() -> None:
             ).scalar()
             if existing:
                 continue
-            proposal_obj = dict(proposal) if isinstance(proposal, dict) else proposal
-            sow_obj = dict(sow) if isinstance(sow, dict) else sow
+            proposal_obj = proposal
+            sow_obj = sow
             if isinstance(proposal_obj, dict):
                 proposal_obj.setdefault("assessment_id", aid)
             if isinstance(sow_obj, dict):
                 sow_obj.setdefault("assessment_id", aid)
-            session.execute(
-                sa.text(
-                    "UPDATE assessments SET proposal_package = :p, sow_package = :s, "
-                    "fee_estimate = :f WHERE id = :aid"
-                ),
-                {"p": proposal_obj, "s": sow_obj, "f": fee, "aid": aid},
-            )
+
+            params = {
+                "p": _as_json_param(proposal_obj),
+                "s": _as_json_param(sow_obj),
+                "f": _as_json_param(fee if not isinstance(fee, str) else fee),
+                "aid": aid,
+            }
+            if dialect == "postgresql":
+                session.execute(
+                    sa.text(
+                        "UPDATE assessments SET "
+                        "proposal_package = CAST(:p AS JSON), "
+                        "sow_package = CAST(:s AS JSON), "
+                        "fee_estimate = CAST(:f AS JSON) "
+                        "WHERE id = :aid"
+                    ),
+                    params,
+                )
+            else:
+                session.execute(
+                    sa.text(
+                        "UPDATE assessments SET proposal_package = :p, sow_package = :s, "
+                        "fee_estimate = :f WHERE id = :aid"
+                    ),
+                    params,
+                )
         session.commit()
     finally:
         session.close()

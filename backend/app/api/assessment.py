@@ -299,25 +299,34 @@ def create_assessment(
     organization = get_or_create_default_organization(db, current_user)
     client = None
 
+    if payload.organization_id is not None:
+        organization, _membership = require_org_permission(
+            db, current_user, payload.organization_id, PERM_ASSESSMENT_WRITE
+        )
+
     if payload.client_id is not None:
         client = get_client_for_user(
             db, current_user, payload.client_id, permission=PERM_CLIENT_MANAGE
         )
         if not client:
             raise HTTPException(status_code=404, detail="Client not found")
+        if (
+            payload.organization_id is not None
+            and client.organization_id != payload.organization_id
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Client does not belong to the selected workspace",
+            )
         organization = (
             db.query(Organization)
             .filter(Organization.id == client.organization_id)
             .first()
             or organization
         )
-        require_org_permission(
-            db, current_user, organization.id, PERM_ASSESSMENT_WRITE
-        )
+        require_org_permission(db, current_user, organization.id, PERM_ASSESSMENT_WRITE)
     else:
-        require_org_permission(
-            db, current_user, organization.id, PERM_ASSESSMENT_WRITE
-        )
+        require_org_permission(db, current_user, organization.id, PERM_ASSESSMENT_WRITE)
         client = (
             db.query(Client)
             .filter(
@@ -805,9 +814,8 @@ def upload_documents(
             # Do not fail Phase 1 analysis if Phase 2 package construction errors;
             # surface via model_error note while keeping assessment results.
             ass.model_error = (
-                (ass.model_error + " | " if ass.model_error else "")
-                + f"investment_intelligence_error: {invest_exc}"
-            )
+                ass.model_error + " | " if ass.model_error else ""
+            ) + f"investment_intelligence_error: {invest_exc}"
 
         db.commit()
         db.refresh(ass)
@@ -1026,13 +1034,9 @@ def export_assessment_report(
     )
     internal_demo = _is_internal_demo_export(ass, mode)
     if internal_demo:
-        get_accessible_assessment(
-            db, current_user, id, permission=PERM_EXPORT_INTERNAL
-        )
+        get_accessible_assessment(db, current_user, id, permission=PERM_EXPORT_INTERNAL)
     elif (ass.approval_status or "").lower() == "approved":
-        get_accessible_assessment(
-            db, current_user, id, permission=PERM_EXPORT_APPROVED
-        )
+        get_accessible_assessment(db, current_user, id, permission=PERM_EXPORT_APPROVED)
     if internal_demo:
         # Clearly marked internal demo path — not a verified client deliverable.
         data = _db_assessment_to_dict(ass)
@@ -1057,7 +1061,11 @@ def export_assessment_report(
 
     # Attach workspace branding (never cross-org).
     if getattr(ass, "organization_id", None):
-        org = db.query(Organization).filter(Organization.id == ass.organization_id).first()
+        org = (
+            db.query(Organization)
+            .filter(Organization.id == ass.organization_id)
+            .first()
+        )
         if org:
             data["branding"] = branding_dict(org)
             data["prepared_by"] = org.brand_display_name or org.name
@@ -1070,10 +1078,16 @@ def export_assessment_report(
         if ass.client_id:
             client = db.query(Client).filter(Client.id == ass.client_id).first()
         if not client:
-            raise HTTPException(status_code=400, detail="Client required for proposal/SOW export")
+            raise HTTPException(
+                status_code=400, detail="Client required for proposal/SOW export"
+            )
         org = None
         if ass.organization_id:
-            org = db.query(Organization).filter(Organization.id == ass.organization_id).first()
+            org = (
+                db.query(Organization)
+                .filter(Organization.id == ass.organization_id)
+                .first()
+            )
         # Prefer assessment-bound packages so sibling engagements stay isolated.
         if getattr(ass, "proposal_package", None) and getattr(ass, "sow_package", None):
             data["proposal_package"] = ass.proposal_package
@@ -1084,7 +1098,8 @@ def export_assessment_report(
             selected = next((o for o in opportunities if o.get("pilot_selected")), None)
             if selected is None and opportunities:
                 selected = next(
-                    (o for o in opportunities if o.get("ranking") == 1), opportunities[0]
+                    (o for o in opportunities if o.get("ranking") == 1),
+                    opportunities[0],
                 )
             fee = getattr(ass, "fee_estimate", None) or client.fee_estimate
             proposal = build_proposal_and_sow(

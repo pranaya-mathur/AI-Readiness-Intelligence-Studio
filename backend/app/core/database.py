@@ -194,6 +194,7 @@ def ensure_runtime_schema():
         "proposal_package": "ALTER TABLE assessments ADD COLUMN proposal_package JSON",
         "sow_package": "ALTER TABLE assessments ADD COLUMN sow_package JSON",
         "fee_estimate": "ALTER TABLE assessments ADD COLUMN fee_estimate JSON",
+        "proposal_revision_history": "ALTER TABLE assessments ADD COLUMN proposal_revision_history JSON",
         "proposal_locked": "ALTER TABLE assessments ADD COLUMN proposal_locked INTEGER DEFAULT 0",
         "proposal_approved_at": "ALTER TABLE assessments ADD COLUMN proposal_approved_at DATETIME",
     }

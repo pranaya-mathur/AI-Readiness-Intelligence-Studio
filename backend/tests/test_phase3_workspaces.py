@@ -159,7 +159,10 @@ def test_org_isolation_and_workspace_journeys(client, db_session):
     upd = client.put(
         f"/api/v1/workspaces/{agency_org['id']}",
         headers=agency_headers,
-        json={"workspace_type": "consulting_agency", "name": "Northwind Advisory [DEMO]"},
+        json={
+            "workspace_type": "consulting_agency",
+            "name": "Northwind Advisory [DEMO]",
+        },
     )
     assert upd.status_code == 200
     brand = client.put(
@@ -271,8 +274,7 @@ def test_org_isolation_and_workspace_journeys(client, db_session):
     )
     assert engagements.status_code == 200
     assert any(
-        e["client_id"] == agency_client["id"]
-        for e in engagements.json()["engagements"]
+        e["client_id"] == agency_client["id"] for e in engagements.json()["engagements"]
     )
 
     # Seed completed assessment fields for proposal generation path
@@ -341,7 +343,10 @@ def test_org_isolation_and_workspace_journeys(client, db_session):
     reopen = client.put(
         f"/api/v1/workspaces/assessments/{agency_assessment['id']}/workflow",
         headers=agency_headers,
-        json={"workflow_status": "consultant_review", "reason": "Revise fee assumptions"},
+        json={
+            "workflow_status": "consultant_review",
+            "reason": "Revise fee assumptions",
+        },
     )
     assert reopen.status_code == 200
     assert reopen.json()["locked_for_delivery"] is False

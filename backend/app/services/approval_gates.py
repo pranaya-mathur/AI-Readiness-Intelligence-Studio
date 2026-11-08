@@ -39,7 +39,9 @@ def assessment_is_client_exportable(ass: Assessment) -> tuple[bool, str]:
     return True, ""
 
 
-def assert_assessment_approvable(ass: Assessment, *, target_status: str = "approved") -> None:
+def assert_assessment_approvable(
+    ass: Assessment, *, target_status: str = "approved"
+) -> None:
     """Enforce prerequisites before assessment approval_status promotion."""
     if target_status not in {"reviewed", "approved"}:
         return
@@ -74,7 +76,9 @@ def assert_assessment_approvable(ass: Assessment, *, target_status: str = "appro
             detail="Simulated model output cannot be approved as verified analysis.",
         )
     if not exportable:
-        raise HTTPException(status_code=409, detail=reason or "Assessment is not approvable")
+        raise HTTPException(
+            status_code=409, detail=reason or "Assessment is not approvable"
+        )
 
 
 def assert_investment_decision_allowed(status: str) -> None:

@@ -44,8 +44,12 @@ def client(db_session):
     app.dependency_overrides.clear()
 
 
-def _register_and_login(client: TestClient, email: str, password: str = "Phase3Demo!23") -> str:
-    reg = client.post("/api/v1/auth/register", json={"email": email, "password": password})
+def _register_and_login(
+    client: TestClient, email: str, password: str = "Phase3Demo!23"
+) -> str:
+    reg = client.post(
+        "/api/v1/auth/register", json={"email": email, "password": password}
+    )
     assert reg.status_code in {200, 201}, reg.text
     login = client.post(
         "/api/v1/auth/login", data={"username": email, "password": password}
@@ -237,31 +241,21 @@ def test_client_viewer_scoped_to_authorized_engagement_only(client, db_session):
     assert ok.json().get("reviewer_notes") in (None, "")
 
     # Cannot see B assessment / investment / proposal / export
-    assert (
-        client.get(f"/api/v1/assessments/{assessments['B']['id']}", headers=viewer).status_code
-        in {403, 404}
-    )
-    assert (
-        client.get(
-            f"/api/v1/assessments/{assessments['B']['id']}/investment-intelligence",
-            headers=viewer,
-        ).status_code
-        in {403, 404}
-    )
-    assert (
-        client.get(
-            f"/api/v1/workspaces/assessments/{assessments['B']['id']}/proposal-sow",
-            headers=viewer,
-        ).status_code
-        in {403, 404}
-    )
-    assert (
-        client.get(
-            f"/api/v1/assessments/{assessments['B']['id']}/export/pdf",
-            headers=viewer,
-        ).status_code
-        in {403, 404}
-    )
+    assert client.get(
+        f"/api/v1/assessments/{assessments['B']['id']}", headers=viewer
+    ).status_code in {403, 404}
+    assert client.get(
+        f"/api/v1/assessments/{assessments['B']['id']}/investment-intelligence",
+        headers=viewer,
+    ).status_code in {403, 404}
+    assert client.get(
+        f"/api/v1/workspaces/assessments/{assessments['B']['id']}/proposal-sow",
+        headers=viewer,
+    ).status_code in {403, 404}
+    assert client.get(
+        f"/api/v1/assessments/{assessments['B']['id']}/export/pdf",
+        headers=viewer,
+    ).status_code in {403, 404}
 
     listed = client.get("/api/v1/assessments/", headers=viewer)
     assert listed.status_code == 200
@@ -440,3 +434,173 @@ def test_enterprise_org_wide_visibility_for_internal_roles(client, db_session):
     ).json()
     p_ids = {row["assessment_id"] for row in portfolio["assessments"]}
     assert a1["id"] in p_ids and a2["id"] in p_ids
+
+
+def test_client_viewer_cannot_list_membership_directory(client, db_session):
+    owner = _register_and_login(client, "agency.members@demo.example")
+    headers = _auth(owner)
+    ws = client.get("/api/v1/workspaces/", headers=headers).json()[0]
+    c = client.post(
+        "/api/v1/clients/",
+        headers=headers,
+        json={
+            "name": "Scoped Client [DEMO]",
+            "industry": "Services",
+            "organization_id": ws["id"],
+        },
+    ).json()
+    membership = client.post(
+        f"/api/v1/workspaces/{ws['id']}/members",
+        headers=headers,
+        json={
+            "email": "viewer.members@demo.example",
+            "role": "client_viewer",
+            "temporary_password": "Phase3Demo!23",
+            "authorized_client_ids": [c["id"]],
+        },
+    )
+    assert membership.status_code in {200, 201}, membership.text
+
+    # Owner/admin can see the full directory.
+    owner_list = client.get(f"/api/v1/workspaces/{ws['id']}/members", headers=headers)
+    assert owner_list.status_code == 200, owner_list.text
+    assert any(m["email"] == "viewer.members@demo.example" for m in owner_list.json())
+
+    viewer_token = client.post(
+        "/api/v1/auth/login",
+        data={
+            "username": "viewer.members@demo.example",
+            "password": "Phase3Demo!23",
+        },
+    ).json()["access_token"]
+    viewer = _auth(viewer_token)
+    denied = client.get(f"/api/v1/workspaces/{ws['id']}/members", headers=viewer)
+    assert denied.status_code == 403
+
+
+def test_assessment_creation_scopes_to_selected_organization(client, db_session):
+    owner = _register_and_login(client, "multi.workspace@demo.example")
+    headers = _auth(owner)
+    default_ws = client.get("/api/v1/workspaces/", headers=headers).json()[0]
+
+    # Create a second organization by registering another owner and inviting this user.
+    other = _register_and_login(client, "second.org.owner@demo.example")
+    other_headers = _auth(other)
+    other_ws = client.get("/api/v1/workspaces/", headers=other_headers).json()[0]
+    invite = client.post(
+        f"/api/v1/workspaces/{other_ws['id']}/members",
+        headers=other_headers,
+        json={
+            "email": "multi.workspace@demo.example",
+            "role": "consultant_analyst",
+        },
+    )
+    assert invite.status_code in {200, 201}, invite.text
+
+    # Explicit organization_id must win over default owned org.
+    ass = client.post(
+        "/api/v1/assessments/",
+        headers=headers,
+        json={
+            "organization_id": other_ws["id"],
+            "company_name": "Second Org Client [DEMO]",
+            "industry": "Retail",
+            "departments": ["Ops"],
+            "current_tools": ["POS"],
+            "main_business_goals": "Scoped creation",
+            "pain_points": ["Manual work"],
+            "ai_goals": ["Efficiency"],
+        },
+    )
+    assert ass.status_code == 200, ass.text
+    body = ass.json()
+    assert body["organization_id"] == other_ws["id"]
+    assert body["organization_id"] != default_ws["id"]
+
+    clients_default = client.get(
+        f"/api/v1/clients/?organization_id={default_ws['id']}", headers=headers
+    ).json()
+    clients_other = client.get(
+        f"/api/v1/clients/?organization_id={other_ws['id']}", headers=headers
+    ).json()
+    assert all(c["name"] != "Second Org Client [DEMO]" for c in clients_default)
+    assert any(c["name"] == "Second Org Client [DEMO]" for c in clients_other)
+
+
+def test_approved_proposal_regeneration_preserves_revision_history(client, db_session):
+    owner = _register_and_login(client, "agency.revisions@demo.example")
+    headers = _auth(owner)
+    ws = client.get("/api/v1/workspaces/", headers=headers).json()[0]
+    c = client.post(
+        "/api/v1/clients/",
+        headers=headers,
+        json={
+            "name": "Revision Client [DEMO]",
+            "industry": "Healthcare",
+            "organization_id": ws["id"],
+        },
+    ).json()
+    ass = client.post(
+        "/api/v1/assessments/",
+        headers=headers,
+        json={
+            "client_id": c["id"],
+            "organization_id": ws["id"],
+            "company_name": c["name"],
+            "industry": "Healthcare",
+            "departments": ["Ops"],
+            "current_tools": ["EHR"],
+            "main_business_goals": "Reduce charting time",
+            "pain_points": ["Manual charting"],
+            "ai_goals": ["Efficiency"],
+        },
+    ).json()
+    _seed_completed_assessment(db_session, ass["id"])
+
+    first = client.post(
+        f"/api/v1/workspaces/assessments/{ass['id']}/proposal-sow",
+        headers=headers,
+        json={
+            "fee_estimate": {
+                "currency": "USD",
+                "pilot_fee": 55000,
+                "assumptions": ["Initial approved fee"],
+            }
+        },
+    )
+    assert first.status_code == 200, first.text
+    assert first.json()["proposal_package"]["proposed_project_fees"]["pilot_fee"] == 55000
+
+    wf = client.put(
+        f"/api/v1/workspaces/assessments/{ass['id']}/workflow",
+        headers=headers,
+        json={"workflow_status": "approved", "reason": "Client accepted v1"},
+    )
+    assert wf.status_code == 200, wf.text
+
+    regenerated = client.post(
+        f"/api/v1/workspaces/assessments/{ass['id']}/proposal-sow",
+        headers=headers,
+        json={
+            "reason": "Revise commercial assumptions after reopen",
+            "fee_estimate": {
+                "currency": "USD",
+                "pilot_fee": 72000,
+                "assumptions": ["Revised fee after reopen"],
+            },
+        },
+    )
+    assert regenerated.status_code == 200, regenerated.text
+    assert regenerated.json()["proposal_package"]["proposed_project_fees"]["pilot_fee"] == 72000
+    assert regenerated.json()["revision_count"] >= 1
+
+    current = client.get(
+        f"/api/v1/workspaces/assessments/{ass['id']}/proposal-sow",
+        headers=headers,
+    )
+    assert current.status_code == 200
+    history = current.json().get("revision_history") or []
+    assert len(history) >= 1
+    assert history[0]["immutable"] is True
+    assert history[0]["proposal_package"]["proposed_project_fees"]["pilot_fee"] == 55000
+    assert "Revise commercial" in (history[0].get("reason") or "")

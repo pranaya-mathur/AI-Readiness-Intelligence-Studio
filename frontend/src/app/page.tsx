@@ -512,12 +512,15 @@ export default function Home() {
     }
   }, [token, handleLogout, getAuthHeaders]);
 
-  const loadClients = useCallback(async () => {
-    if (!token) return;
+  const loadClients = useCallback(async (organizationId?: number | null) => {
+    if (!token || !organizationId) return;
     try {
-      const res = await fetch(`${API_BASE}/clients/`, {
-        headers: getAuthHeaders(),
-      });
+      const res = await fetch(
+        `${API_BASE}/clients/?organization_id=${organizationId}`,
+        {
+          headers: getAuthHeaders(),
+        }
+      );
       if (res.status === 401) {
         handleLogout();
         return;
@@ -527,6 +530,11 @@ export default function Home() {
       }
       const loadedClients: ClientWorkspace[] = await res.json();
       setClients(loadedClients);
+      setSelectedClientId((current) => {
+        if (!current) return "";
+        const stillVisible = loadedClients.some((c) => String(c.id) === current);
+        return stillVisible ? current : "";
+      });
     } catch (err) {
       console.error(err);
     }
@@ -731,18 +739,26 @@ export default function Home() {
   // Trigger seeding Apex Consulting instantly on dashboard load
   useEffect(() => {
     if (isLoggedIn) {
-      loadClients();
       loadAssessments();
       loadWorkspaces();
     }
-  }, [isLoggedIn, loadAssessments, loadClients, loadWorkspaces]);
+  }, [isLoggedIn, loadAssessments, loadWorkspaces]);
 
   useEffect(() => {
     if (selectedWorkspace?.id) {
+      loadClients(selectedWorkspace.id);
       loadWorkspaceViews(selectedWorkspace.id);
       loadWorkspaceMembers(selectedWorkspace.id);
+      // Clear assessment selection that belongs to another workspace.
+      setSelectedAssessment((current) => {
+        if (!current) return current;
+        if (current.organization_id && current.organization_id !== selectedWorkspace.id) {
+          return null;
+        }
+        return current;
+      });
     }
-  }, [selectedWorkspace?.id, loadWorkspaceViews, loadWorkspaceMembers]);
+  }, [selectedWorkspace?.id, loadClients, loadWorkspaceViews, loadWorkspaceMembers]);
 
   useEffect(() => {
     if (selectedAssessment?.id && insightsSubTab === "proposal") {
@@ -800,6 +816,7 @@ export default function Home() {
     try {
       const payload = {
         client_id: selectedClientId ? parseInt(selectedClientId, 10) : null,
+        organization_id: selectedWorkspace?.id ?? null,
         company_name: companyName,
         industry,
         company_size: companySize,

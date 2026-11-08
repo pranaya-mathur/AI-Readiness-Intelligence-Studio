@@ -58,7 +58,8 @@ def build_proposal_and_sow(
         "monthly_retainer": fee.get("monthly_retainer"),
         "assumptions": fee.get("assumptions") or [],
         "complete": bool(
-            fee.get("pilot_fee") is not None or fee.get("implementation_fee") is not None
+            fee.get("pilot_fee") is not None
+            or fee.get("implementation_fee") is not None
         ),
     }
     if not project_fees["complete"]:
@@ -68,12 +69,12 @@ def build_proposal_and_sow(
         )
 
     operating_costs = {
-        "cloud_llm_monthly_cost": ((opportunity or {}).get("financial_inputs") or {}).get(
-            "cloud_llm_monthly_cost"
-        ),
-        "licensing_monthly_cost": ((opportunity or {}).get("financial_inputs") or {}).get(
-            "licensing_monthly_cost"
-        ),
+        "cloud_llm_monthly_cost": (
+            (opportunity or {}).get("financial_inputs") or {}
+        ).get("cloud_llm_monthly_cost"),
+        "licensing_monthly_cost": (
+            (opportunity or {}).get("financial_inputs") or {}
+        ).get("licensing_monthly_cost"),
         "support_monthly_cost": ((opportunity or {}).get("financial_inputs") or {}).get(
             "support_monthly_cost"
         ),
@@ -164,7 +165,9 @@ def build_proposal_and_sow(
         "package_version": SOW_PACKAGE_VERSION,
         "branding": branding or {},
         "parties": {
-            "provider": branding.get("display_name") if branding else organization.get("name"),
+            "provider": branding.get("display_name")
+            if branding
+            else organization.get("name"),
             "client": client.get("name") or assessment.get("company_name"),
             "contact_email": (branding or {}).get("contact_email"),
             "contact_phone": (branding or {}).get("contact_phone"),
@@ -192,8 +195,14 @@ def build_proposal_and_sow(
             ],
         },
         "proposed_team_roles": [
-            {"role": "Engagement lead", "responsibility": "Scope, timeline, decision gates"},
-            {"role": "Solution architect", "responsibility": "Approach and integration design"},
+            {
+                "role": "Engagement lead",
+                "responsibility": "Scope, timeline, decision gates",
+            },
+            {
+                "role": "Solution architect",
+                "responsibility": "Approach and integration design",
+            },
             {
                 "role": "Domain reviewer",
                 "responsibility": "Human-in-the-loop quality and acceptance",

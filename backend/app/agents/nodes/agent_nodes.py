@@ -54,14 +54,40 @@ def _evidence_block(state: AssessmentState) -> str:
 
 
 def _sync_model_meta(state: AssessmentState) -> dict[str, Any]:
+    """Merge live router session metadata without clobbering earlier successes.
+
+    LangGraph nodes may run across contexts where ContextVar session runs are
+    empty. Never overwrite a verified prior success/failure with not_started.
+    """
     summary = LLMRouter.session_summary()
+    prior_status = (getattr(state, "model_run_status", None) or "not_started").lower()
+    new_status = (summary.get("status") or "not_started").lower()
+    if new_status == "not_started" and prior_status != "not_started":
+        return {
+            "analysis_mode": getattr(state, "analysis_mode", None) or _analysis_mode(),
+            "model_provider": getattr(state, "model_provider", None) or "none",
+            "model_name": getattr(state, "model_name", None) or "none",
+            "model_run_status": state.model_run_status,
+            "model_error": getattr(state, "model_error", None),
+            "model_run_history": getattr(state, "model_run_history", None)
+            or summary.get("runs")
+            or [],
+        }
     return {
         "analysis_mode": summary.get("execution_mode") or _analysis_mode(),
-        "model_provider": summary.get("provider") or "none",
-        "model_name": summary.get("model") or "none",
-        "model_run_status": summary.get("status") or "not_started",
-        "model_error": summary.get("error"),
-        "model_run_history": summary.get("runs") or [],
+        "model_provider": summary.get("provider")
+        or getattr(state, "model_provider", None)
+        or "none",
+        "model_name": summary.get("model")
+        or getattr(state, "model_name", None)
+        or "none",
+        "model_run_status": summary.get("status") or prior_status or "not_started",
+        "model_error": summary.get("error")
+        if summary.get("error") is not None
+        else getattr(state, "model_error", None),
+        "model_run_history": summary.get("runs")
+        or getattr(state, "model_run_history", None)
+        or [],
     }
 
 

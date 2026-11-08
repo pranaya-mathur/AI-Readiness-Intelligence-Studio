@@ -23,7 +23,9 @@ from app.models import (
 from app.services.approval_gates import CLIENT_FACING_WORKFLOWS
 
 
-def ensure_owner_membership(db: Session, organization: Organization) -> OrganizationMembership:
+def ensure_owner_membership(
+    db: Session, organization: Organization
+) -> OrganizationMembership:
     membership = (
         db.query(OrganizationMembership)
         .filter(
@@ -100,9 +102,7 @@ def list_user_organizations(db: Session, user: User) -> list[Organization]:
         .filter(OrganizationMembership.user_id == user.id)
         .all()
     ]
-    owned = (
-        db.query(Organization).filter(Organization.owner_user_id == user.id).all()
-    )
+    owned = db.query(Organization).filter(Organization.owner_user_id == user.id).all()
     for org in owned:
         if org.id not in org_ids:
             ensure_owner_membership(db, org)
@@ -172,9 +172,7 @@ def assessment_is_client_viewer_visible(ass: Assessment) -> bool:
     workflow = (ass.workflow_status or "").lower()
     approval = (ass.approval_status or "").lower()
     locked = bool(getattr(ass, "locked_for_delivery", 0))
-    return approval == "approved" and (
-        locked or workflow in CLIENT_FACING_WORKFLOWS
-    )
+    return approval == "approved" and (locked or workflow in CLIENT_FACING_WORKFLOWS)
 
 
 def get_client_for_user(
@@ -189,7 +187,11 @@ def get_client_for_user(
         return None
     membership = get_membership(db, current_user, client.organization_id)
     if not membership:
-        org = db.query(Organization).filter(Organization.id == client.organization_id).first()
+        org = (
+            db.query(Organization)
+            .filter(Organization.id == client.organization_id)
+            .first()
+        )
         if org and org.owner_user_id == current_user.id:
             membership = ensure_owner_membership(db, org)
         else:
@@ -260,7 +262,11 @@ def get_accessible_assessment(
     *,
     permission: str,
 ) -> Assessment:
-    ass = assessments_visible_query(db, user).filter(Assessment.id == assessment_id).first()
+    ass = (
+        assessments_visible_query(db, user)
+        .filter(Assessment.id == assessment_id)
+        .first()
+    )
     if not ass:
         raise HTTPException(status_code=404, detail="Assessment not found")
 
@@ -271,12 +277,12 @@ def get_accessible_assessment(
             raise HTTPException(status_code=403, detail="Permission denied")
         return ass
 
-    _org, membership = require_org_permission(
-        db, user, ass.organization_id, permission
-    )
+    _org, membership = require_org_permission(db, user, ass.organization_id, permission)
     if membership.role == ROLE_CLIENT_VIEWER:
         if not client_is_authorized_for_membership(membership, ass.client_id):
-            raise HTTPException(status_code=403, detail="Client engagement not authorized")
+            raise HTTPException(
+                status_code=403, detail="Client engagement not authorized"
+            )
         if not assessment_is_client_viewer_visible(ass):
             raise HTTPException(
                 status_code=403,

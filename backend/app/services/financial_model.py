@@ -356,7 +356,13 @@ class FinancialModelEngine:
             for k in assumptions
         }
 
-        if None in (monthly_volume, effort_min, hourly, automation, impl):
+        if (
+            monthly_volume is None
+            or effort_min is None
+            or hourly is None
+            or automation is None
+            or impl is None
+        ):
             return cls._empty_scenario(
                 scenario,
                 currency,
@@ -364,21 +370,27 @@ class FinancialModelEngine:
                 "Financial evaluation incomplete — additional baseline information required.",
             )
 
+        monthly_volume_f = float(monthly_volume)
+        effort_min_f = float(effort_min)
+        hourly_f = float(hourly)
+        automation_f = float(automation)
+        impl_f = float(impl)
+
         # Clamp rates into sane bounds without inventing attractiveness.
-        automation = max(0.0, min(1.0, automation * mult["automation_rate"]))
+        automation_f = max(0.0, min(1.0, automation_f * mult["automation_rate"]))
         adoption = max(0.0, min(1.0, adoption * mult["adoption_rate"]))
         rework = max(0.0, min(1.0, rework))
-        impl_total = max(0.0, (impl + integ) * mult["implementation_cost"])
+        impl_total = max(0.0, (impl_f + integ) * mult["implementation_cost"])
         opex_monthly = (cloud + license_ + support + maint) * mult["opex"]
 
-        hours_per_txn = effort_min / 60.0
-        baseline_monthly = monthly_volume * hours_per_txn * hourly
+        hours_per_txn = effort_min_f / 60.0
+        baseline_monthly = monthly_volume_f * hours_per_txn * hourly_f
         baseline_annual = baseline_monthly * 12.0
 
         # Assisted/automated fraction of effort, after adoption, minus remaining review.
         review_hours = review_min / 60.0
-        saved_hours_per_txn = max(0.0, hours_per_txn * automation - review_hours)
-        gross_monthly = monthly_volume * saved_hours_per_txn * hourly * adoption
+        saved_hours_per_txn = max(0.0, hours_per_txn * automation_f - review_hours)
+        gross_monthly = monthly_volume_f * saved_hours_per_txn * hourly_f * adoption
         # Optional rework reduction as additive modeled benefit on baseline.
         gross_monthly += baseline_monthly * rework * adoption * 0.25
         gross_annual = gross_monthly * 12.0

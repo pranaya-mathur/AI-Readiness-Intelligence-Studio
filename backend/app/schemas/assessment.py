@@ -159,6 +159,7 @@ class ClientResponse(ClientBase):
 # --- Main Assessment Schemas ---
 class AssessmentCreate(BaseModel):
     client_id: int | None = None
+    organization_id: int | None = None
     company_name: str
     industry: str | None = "Professional Services"
     company_size: str | None = "100-500 employees"
@@ -219,6 +220,10 @@ class AssessmentUpdate(BaseModel):
 class AssessmentResponse(BaseModel):
     id: int
     client_id: int | None
+    organization_id: int | None = None
+    business_unit: str | None = None
+    workflow_status: str | None = None
+    locked_for_delivery: int | None = 0
     company_name: str
     industry: str | None
     company_size: str | None
