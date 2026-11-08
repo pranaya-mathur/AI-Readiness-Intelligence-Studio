@@ -7,6 +7,17 @@ import {
   UploadCloud, Sparkles, RefreshCw, Trash2, AlertTriangle, LogOut,
   Coins
 } from "lucide-react";
+import WorkspaceSelector from "../components/workspace/WorkspaceSelector";
+import EnterprisePortfolio from "../components/workspace/EnterprisePortfolio";
+import AgencyEngagements from "../components/workspace/AgencyEngagements";
+import ProposalSowEditor from "../components/workspace/ProposalSowEditor";
+import ReviewApprovalPanel from "../components/workspace/ReviewApprovalPanel";
+import type {
+  EngagementItem,
+  PortfolioItem,
+  ProposalSowPayload,
+  WorkspaceSummary,
+} from "../components/workspace/types";
 import { 
   RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, 
   ResponsiveContainer, BarChart, CartesianGrid, XAxis, YAxis, Tooltip, Bar 
@@ -116,6 +127,10 @@ interface Assessment {
   client_summary: string | null;
   reviewer_notes: string | null;
   approval_status: string | null;
+  organization_id?: number | null;
+  business_unit?: string | null;
+  workflow_status?: string | null;
+  locked_for_delivery?: number | boolean | null;
   readiness_interpretation: string | null;
   scoring_method?: string | null;
   scoring_rubric_version?: string | null;
@@ -228,6 +243,15 @@ export default function Home() {
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
   const [token, setToken] = useState("");
+
+  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
+  const [selectedWorkspace, setSelectedWorkspace] = useState<WorkspaceSummary | null>(null);
+  const [portfolioItems, setPortfolioItems] = useState<PortfolioItem[]>([]);
+  const [engagementItems, setEngagementItems] = useState<EngagementItem[]>([]);
+  const [businessUnitFilter, setBusinessUnitFilter] = useState("");
+  const [proposalSow, setProposalSow] = useState<ProposalSowPayload | null>(null);
+  const [workspaceMessage, setWorkspaceMessage] = useState("");
+  const [workspaceBusy, setWorkspaceBusy] = useState(false);
 
   const [activeTab, setActiveTab] = useState("dashboard"); // dashboard, intake, upload, insights
   const [insightsSubTab, setInsightsSubTab] = useState("summary"); // summary, bottlenecks, opportunity, matrix, scoring, risks, pilot, roadmap, export, commercial, investment
@@ -502,13 +526,154 @@ export default function Home() {
     }
   }, [token, handleLogout, getAuthHeaders]);
 
+
+  const loadWorkspaces = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_BASE}/workspaces/`, { headers: getAuthHeaders() });
+      if (!res.ok) throw new Error(await parseErrorMessage(res, "Could not load workspaces"));
+      const data: WorkspaceSummary[] = await res.json();
+      setWorkspaces(data);
+      setSelectedWorkspace((current) => {
+        if (current && data.some((w) => w.id === current.id)) {
+          return data.find((w) => w.id === current.id) || data[0] || null;
+        }
+        return data[0] || null;
+      });
+    } catch (err) {
+      console.error(err);
+    }
+  }, [token]);
+
+  const loadWorkspaceViews = useCallback(async (workspaceId: number) => {
+    try {
+      const [portfolioRes, engRes] = await Promise.all([
+        fetch(`${API_BASE}/workspaces/${workspaceId}/portfolio`, { headers: getAuthHeaders() }),
+        fetch(`${API_BASE}/workspaces/${workspaceId}/engagements`, { headers: getAuthHeaders() }),
+      ]);
+      if (portfolioRes.ok) {
+        const portfolio = await portfolioRes.json();
+        setPortfolioItems(portfolio.assessments || portfolio.items || []);
+      }
+      if (engRes.ok) {
+        const eng = await engRes.json();
+        setEngagementItems(eng.engagements || []);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  }, []);
+
+  const loadProposalSow = useCallback(async (assessmentId: number) => {
+    try {
+      const res = await fetch(`${API_BASE}/workspaces/assessments/${assessmentId}/proposal-sow`, {
+        headers: getAuthHeaders(),
+      });
+      if (res.ok) {
+        setProposalSow(await res.json());
+      } else {
+        setProposalSow(null);
+      }
+    } catch {
+      setProposalSow(null);
+    }
+  }, []);
+
+  const handleGenerateProposalSow = async (feeEstimate: Record<string, unknown>) => {
+    if (!selectedAssessment) return;
+    setWorkspaceBusy(true);
+    setWorkspaceMessage("");
+    try {
+      const res = await fetch(`${API_BASE}/workspaces/assessments/${selectedAssessment.id}/proposal-sow`, {
+        method: "POST",
+        headers: getAuthHeaders(true),
+        body: JSON.stringify({ fee_estimate: feeEstimate }),
+      });
+      if (!res.ok) throw new Error(await parseErrorMessage(res, "Could not generate proposal/SOW"));
+      const data = await res.json();
+      setProposalSow({
+        proposal_package: data.proposal_package,
+        sow_package: data.sow_package,
+        fee_estimate: feeEstimate,
+        complete: true,
+      });
+      setWorkspaceMessage("Proposal/SOW draft generated. Fees remain separate from modeled ROI.");
+      if (selectedWorkspace?.id) loadWorkspaceViews(selectedWorkspace.id);
+    } catch (err) {
+      setWorkspaceMessage(err instanceof Error ? err.message : "Proposal generation failed");
+    } finally {
+      setWorkspaceBusy(false);
+    }
+  };
+
+  const handleExportProposalSow = async () => {
+    if (!selectedAssessment) return;
+    setWorkspaceBusy(true);
+    try {
+      const res = await fetch(`${API_BASE}/assessments/${selectedAssessment.id}/export/proposal-sow`, {
+        headers: getAuthHeaders(),
+      });
+      if (!res.ok) throw new Error(await parseErrorMessage(res, "Could not export proposal/SOW"));
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${selectedAssessment.company_name.replace(/\s+/g, "_")}_Proposal_SOW.docx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setWorkspaceMessage(err instanceof Error ? err.message : "Export failed");
+    } finally {
+      setWorkspaceBusy(false);
+    }
+  };
+
+  const handleWorkflowUpdate = async (status: string, reason: string) => {
+    if (!selectedAssessment) return;
+    setWorkspaceBusy(true);
+    setWorkspaceMessage("");
+    try {
+      const res = await fetch(`${API_BASE}/workspaces/assessments/${selectedAssessment.id}/workflow`, {
+        method: "PUT",
+        headers: getAuthHeaders(true),
+        body: JSON.stringify({ workflow_status: status, reason }),
+      });
+      if (!res.ok) throw new Error(await parseErrorMessage(res, "Could not update workflow"));
+      const data = await res.json();
+      setSelectedAssessment({
+        ...selectedAssessment,
+        workflow_status: data.workflow_status,
+        locked_for_delivery: data.locked_for_delivery ? 1 : 0,
+      } as Assessment);
+      setWorkspaceMessage(`Workflow updated to ${data.workflow_status}`);
+      if (selectedWorkspace?.id) loadWorkspaceViews(selectedWorkspace.id);
+    } catch (err) {
+      setWorkspaceMessage(err instanceof Error ? err.message : "Workflow update failed");
+    } finally {
+      setWorkspaceBusy(false);
+    }
+  };
+
   // Trigger seeding Apex Consulting instantly on dashboard load
   useEffect(() => {
     if (isLoggedIn) {
       loadClients();
       loadAssessments();
+      loadWorkspaces();
     }
-  }, [isLoggedIn, loadAssessments, loadClients]);
+  }, [isLoggedIn, loadAssessments, loadClients, loadWorkspaces]);
+
+  useEffect(() => {
+    if (selectedWorkspace?.id) {
+      loadWorkspaceViews(selectedWorkspace.id);
+    }
+  }, [selectedWorkspace?.id, loadWorkspaceViews]);
+
+  useEffect(() => {
+    if (selectedAssessment?.id && insightsSubTab === "proposal") {
+      loadProposalSow(selectedAssessment.id);
+    }
+  }, [selectedAssessment?.id, insightsSubTab, loadProposalSow]);
 
   // Demo auto fill trigger
   const handleIntakeAutoFill = () => {
@@ -1311,6 +1476,11 @@ export default function Home() {
               <span className="font-semibold text-slate-300">{selectedAssessment.company_name}</span>
             </div>
           )}
+          <WorkspaceSelector
+            workspaces={workspaces}
+            selectedId={selectedWorkspace?.id ?? null}
+            onSelect={(ws) => setSelectedWorkspace(ws)}
+          />
           <button 
             onClick={handleLogout}
             className="p-2 bg-slate-950 hover:bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200 rounded-lg transition-colors flex items-center gap-2 text-xs"
@@ -1332,7 +1502,7 @@ export default function Home() {
               onClick={() => setActiveTab("dashboard")}
               className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${activeTab === "dashboard" ? "bg-blue-600 text-white" : "text-slate-400 hover:text-slate-200"}`}
             >
-              Consulting Console
+              {selectedWorkspace?.workspace_type === "enterprise" ? "Enterprise Console" : "Agency Console"}
             </button>
             <button 
               onClick={() => setActiveTab("intake")}
@@ -1375,6 +1545,39 @@ export default function Home() {
         {/* 1. LANDING DASHBOARD */}
         {activeTab === "dashboard" && (
           <div className="space-y-6">
+            {selectedWorkspace?.workspace_type === "enterprise" ? (
+              <EnterprisePortfolio
+                items={portfolioItems}
+                businessUnitFilter={businessUnitFilter}
+                onBusinessUnitFilter={setBusinessUnitFilter}
+                onOpenAssessment={async (id) => {
+                  const ass = assessments.find((a) => a.id === id);
+                  if (ass) {
+                    setSelectedAssessment(ass);
+                    setActiveTab("insights");
+                    setInsightsSubTab("investment");
+                  } else {
+                    const res = await fetch(`${API_BASE}/assessments/${id}`, { headers: getAuthHeaders() });
+                    if (res.ok) {
+                      const loaded = await res.json();
+                      setSelectedAssessment(loaded);
+                      setAssessments((cur) => [loaded, ...cur.filter((a) => a.id !== loaded.id)]);
+                      setActiveTab("insights");
+                      setInsightsSubTab("investment");
+                    }
+                  }
+                }}
+              />
+            ) : (
+              <AgencyEngagements
+                engagements={engagementItems}
+                onOpenClient={(clientId) => {
+                  setSelectedClientId(String(clientId));
+                  setActiveTab("intake");
+                }}
+                onCreateEngagement={() => setActiveTab("intake")}
+              />
+            )}
             {/* Executive Command Center */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="glass-panel p-4 rounded-xl text-center flex flex-col justify-between">
@@ -2026,7 +2229,9 @@ export default function Home() {
                 { id: "roadmap", label: "90-Day Roadmap", icon: Calendar },
                 { id: "commercial", label: "Commercial Strategy", icon: Coins },
                 { id: "investment", label: "Investment Intelligence", icon: TrendingUp },
-                { id: "export", label: "Strategy Asset Generator", icon: Download }
+                { id: "export", label: "Strategy Asset Generator", icon: Download },
+                { id: "proposal", label: "Proposal / SOW", icon: FileText },
+                { id: "workflow", label: "Review Workflow", icon: CheckCircle }
               ].map(sub => {
                 const active = insightsSubTab === sub.id;
                 const Icon = sub.icon;
@@ -3469,6 +3674,27 @@ export default function Home() {
 
                   </div>
                 </div>
+              )}
+
+              {insightsSubTab === "proposal" && (
+                <ProposalSowEditor
+                  payload={proposalSow}
+                  busy={workspaceBusy}
+                  message={workspaceMessage}
+                  onGenerate={handleGenerateProposalSow}
+                  onExport={handleExportProposalSow}
+                />
+              )}
+
+              {insightsSubTab === "workflow" && (
+                <ReviewApprovalPanel
+                  workflowStatus={(selectedAssessment as any)?.workflow_status}
+                  approvalStatus={selectedAssessment?.approval_status}
+                  investmentStatus={selectedAssessment?.investment_decision_status}
+                  locked={Boolean((selectedAssessment as any)?.locked_for_delivery)}
+                  busy={workspaceBusy}
+                  onWorkflowChange={handleWorkflowUpdate}
+                />
               )}
 
             </div>

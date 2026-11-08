@@ -1573,3 +1573,84 @@ class DocumentGenerators:
         prs.save(pptx_buffer)
         pptx_buffer.seek(0)
         return pptx_buffer
+
+    @staticmethod
+    def generate_proposal_sow_docx(assessment: dict[str, Any]) -> io.BytesIO:
+        """Phase 3: editable proposal + SOW draft grounded in assessment evidence."""
+        assessment = DocumentGenerators.cleanup_export_data(assessment)
+        branding = assessment.get("branding") or {}
+        proposal = assessment.get("proposal_package") or {}
+        sow = assessment.get("sow_package") or {}
+        prepared_by = (
+            branding.get("display_name")
+            or assessment.get("prepared_by")
+            or "AI Readiness Studio"
+        )
+        primary = branding.get("primary_color") or "#3b82f6"
+
+        doc = Document()
+        styles = doc.styles
+        styles["Normal"].font.name = "Arial"
+        styles["Normal"].font.size = Pt(10.5)
+
+        title = doc.add_paragraph()
+        run = title.add_run("AI Implementation Proposal & Statement of Work")
+        run.font.size = Pt(20)
+        run.font.bold = True
+        run.font.color.rgb = RGBColor(15, 23, 42)
+
+        meta = doc.add_paragraph()
+        meta.add_run(
+            f"Prepared by: {prepared_by}\n"
+            f"Prepared for: {assessment.get('company_name')}\n"
+            f"Date: {DocumentGenerators._report_date()}\n"
+            f"Brand accent: {primary}\n"
+            f"Footer: {branding.get('footer_text') or prepared_by}"
+        )
+        if branding.get("contact_email") or branding.get("contact_phone"):
+            meta.add_run(
+                f"\nContact: {branding.get('contact_email') or '—'} "
+                f"| {branding.get('contact_phone') or '—'}"
+            )
+        doc.add_page_break()
+
+        def _section(heading: str, body: Any) -> None:
+            h = doc.add_heading(level=1)
+            hr = h.add_run(heading)
+            hr.font.color.rgb = RGBColor(59, 130, 246)
+            if isinstance(body, dict):
+                for key, value in body.items():
+                    p = doc.add_paragraph()
+                    p.add_run(f"{str(key).replace('_', ' ').title()}: ").bold = True
+                    if isinstance(value, (list, dict)):
+                        p.add_run(str(value))
+                    else:
+                        p.add_run("" if value is None else str(value))
+            elif isinstance(body, list):
+                for item in body:
+                    doc.add_paragraph(
+                        f"• {item}" if not isinstance(item, dict) else f"• {item}",
+                        style="List Bullet",
+                    )
+            else:
+                doc.add_paragraph("" if body is None else str(body))
+
+        _section("1. Proposal Package", proposal)
+        doc.add_page_break()
+        _section("2. Statement of Work", sow)
+
+        # Explicit commercial separation reminder
+        note = doc.add_paragraph()
+        note.add_run("Commercial separation: ").bold = True
+        note.add_run(
+            "Estimated client benefits/ROI are not the proposed project fee. "
+            "Missing fee estimates remain incomplete until explicitly entered."
+        )
+        if branding.get("footer_text"):
+            foot = doc.add_paragraph()
+            foot.add_run(str(branding["footer_text"])).italic = True
+
+        buf = io.BytesIO()
+        doc.save(buf)
+        buf.seek(0)
+        return buf

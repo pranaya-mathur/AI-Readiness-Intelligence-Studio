@@ -182,3 +182,62 @@ def ensure_runtime_schema():
                 conn.execute(
                     text(f"ALTER TABLE {table_name} ADD COLUMN evidence_refs JSON")
                 )
+
+    # Phase 3 workspace columns (local SQLite convenience; Postgres uses Alembic).
+    phase3_assessment_columns = {
+        "organization_id": "ALTER TABLE assessments ADD COLUMN organization_id INTEGER",
+        "business_unit": "ALTER TABLE assessments ADD COLUMN business_unit VARCHAR",
+        "workflow_status": "ALTER TABLE assessments ADD COLUMN workflow_status VARCHAR",
+        "locked_for_delivery": "ALTER TABLE assessments ADD COLUMN locked_for_delivery INTEGER DEFAULT 0",
+        "workflow_approved_at": "ALTER TABLE assessments ADD COLUMN workflow_approved_at DATETIME",
+        "workflow_approved_by_user_id": "ALTER TABLE assessments ADD COLUMN workflow_approved_by_user_id INTEGER",
+    }
+    for column_name, ddl in phase3_assessment_columns.items():
+        if column_name not in assessment_columns:
+            logger.info("Adding missing assessments.%s column...", column_name)
+            with engine.begin() as conn:
+                conn.execute(text(ddl))
+
+    if "organizations" in inspector.get_table_names():
+        org_columns = {
+            column["name"] for column in inspector.get_columns("organizations")
+        }
+        phase3_org_columns = {
+            "workspace_type": "ALTER TABLE organizations ADD COLUMN workspace_type VARCHAR DEFAULT 'consulting_agency'",
+            "brand_display_name": "ALTER TABLE organizations ADD COLUMN brand_display_name VARCHAR",
+            "brand_logo_url": "ALTER TABLE organizations ADD COLUMN brand_logo_url VARCHAR",
+            "brand_primary_color": "ALTER TABLE organizations ADD COLUMN brand_primary_color VARCHAR",
+            "brand_secondary_color": "ALTER TABLE organizations ADD COLUMN brand_secondary_color VARCHAR",
+            "brand_contact_email": "ALTER TABLE organizations ADD COLUMN brand_contact_email VARCHAR",
+            "brand_contact_phone": "ALTER TABLE organizations ADD COLUMN brand_contact_phone VARCHAR",
+            "brand_footer_text": "ALTER TABLE organizations ADD COLUMN brand_footer_text TEXT",
+        }
+        for column_name, ddl in phase3_org_columns.items():
+            if column_name not in org_columns:
+                logger.info("Adding missing organizations.%s column...", column_name)
+                with engine.begin() as conn:
+                    conn.execute(text(ddl))
+
+    if "clients" in inspector.get_table_names():
+        client_columns = {column["name"] for column in inspector.get_columns("clients")}
+        phase3_client_columns = {
+            "business_unit": "ALTER TABLE clients ADD COLUMN business_unit VARCHAR",
+            "engagement_status": "ALTER TABLE clients ADD COLUMN engagement_status VARCHAR",
+            "assigned_consultant_user_id": "ALTER TABLE clients ADD COLUMN assigned_consultant_user_id INTEGER",
+            "consultant_notes": "ALTER TABLE clients ADD COLUMN consultant_notes TEXT",
+            "proposal_package": "ALTER TABLE clients ADD COLUMN proposal_package JSON",
+            "sow_package": "ALTER TABLE clients ADD COLUMN sow_package JSON",
+            "fee_estimate": "ALTER TABLE clients ADD COLUMN fee_estimate JSON",
+        }
+        for column_name, ddl in phase3_client_columns.items():
+            if column_name not in client_columns:
+                logger.info("Adding missing clients.%s column...", column_name)
+                with engine.begin() as conn:
+                    conn.execute(text(ddl))
+
+    if "users" in inspector.get_table_names():
+        user_columns = {column["name"] for column in inspector.get_columns("users")}
+        if "full_name" not in user_columns:
+            logger.info("Adding missing users.full_name column...")
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE users ADD COLUMN full_name VARCHAR"))

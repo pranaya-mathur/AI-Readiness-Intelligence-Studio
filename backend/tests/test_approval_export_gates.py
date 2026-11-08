@@ -90,6 +90,7 @@ def test_export_endpoint_rejects_mode_demo_on_real_unapproved_assessment(monkeyp
     real_ass = SimpleNamespace(
         id=42,
         user_id=1,
+        organization_id=None,
         company_name="Acme Corp",
         approval_status="draft",
         status="completed",
@@ -100,10 +101,13 @@ def test_export_endpoint_rejects_mode_demo_on_real_unapproved_assessment(monkeyp
     db = _mock_db_with_assessment(real_ass)
     user = SimpleNamespace(id=1)
 
-    with pytest.raises(HTTPException) as exc:
-        export_assessment_report(
-            id=42, doc_format="pdf", mode="demo", db=db, current_user=user
-        )
+    with patch(
+        "app.api.assessment.get_accessible_assessment", return_value=real_ass
+    ):
+        with pytest.raises(HTTPException) as exc:
+            export_assessment_report(
+                id=42, doc_format="pdf", mode="demo", db=db, current_user=user
+            )
     assert exc.value.status_code == 409
     assert "approved" in str(exc.value.detail).lower()
 
@@ -115,6 +119,7 @@ def test_export_endpoint_allows_genuine_demo_bypass(monkeypatch):
     demo_ass = SimpleNamespace(
         id=7,
         user_id=1,
+        organization_id=None,
         company_name="Apex Global Consulting Partners",
         approval_status="draft",
         status="completed",
@@ -130,6 +135,7 @@ def test_export_endpoint_allows_genuine_demo_bypass(monkeypatch):
     fake_pdf = MagicMock()
 
     with (
+        patch("app.api.assessment.get_accessible_assessment", return_value=demo_ass),
         patch(
             "app.api.assessment._db_assessment_to_dict",
             return_value={
@@ -163,6 +169,7 @@ def test_export_endpoint_requires_approval_for_docx_pptx_on_real(monkeypatch):
     real_ass = SimpleNamespace(
         id=99,
         user_id=1,
+        organization_id=None,
         company_name="Real Client Co",
         approval_status="reviewed",
         status="completed",
@@ -173,10 +180,13 @@ def test_export_endpoint_requires_approval_for_docx_pptx_on_real(monkeypatch):
     db = _mock_db_with_assessment(real_ass)
     user = SimpleNamespace(id=1)
 
-    for fmt in ("docx", "pptx", "pdf"):
-        with pytest.raises(HTTPException) as exc:
-            export_assessment_report(
-                id=99, doc_format=fmt, mode="demo", db=db, current_user=user
-            )
-        assert exc.value.status_code == 409
-        assert "approved" in str(exc.value.detail).lower()
+    with patch(
+        "app.api.assessment.get_accessible_assessment", return_value=real_ass
+    ):
+        for fmt in ("docx", "pptx", "pdf"):
+            with pytest.raises(HTTPException) as exc:
+                export_assessment_report(
+                    id=99, doc_format=fmt, mode="demo", db=db, current_user=user
+                )
+            assert exc.value.status_code == 409
+            assert "approved" in str(exc.value.detail).lower()

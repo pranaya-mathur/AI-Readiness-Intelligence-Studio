@@ -14,6 +14,7 @@ class User(Base):
     hashed_password = Column(String, nullable=False)
     is_active = Column(Integer, default=1)  # 1 = active, 0 = inactive
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    full_name = Column(String, nullable=True)
     organizations = relationship(
         "Organization", back_populates="owner", cascade="all, delete-orphan"
     )
@@ -21,6 +22,12 @@ class User(Base):
         "Assessment",
         back_populates="user",
         foreign_keys="[Assessment.user_id]",
+    )
+    memberships = relationship(
+        "OrganizationMembership",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        foreign_keys="[OrganizationMembership.user_id]",
     )
 
 
@@ -30,11 +37,52 @@ class Organization(Base):
     id = Column(Integer, primary_key=True, index=True)
     owner_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     name = Column(String, nullable=False)
+    # Phase 3: enterprise | consulting_agency
+    workspace_type = Column(String, nullable=False, default="consulting_agency")
+    brand_display_name = Column(String, nullable=True)
+    brand_logo_url = Column(String, nullable=True)
+    brand_primary_color = Column(String, nullable=True)
+    brand_secondary_color = Column(String, nullable=True)
+    brand_contact_email = Column(String, nullable=True)
+    brand_contact_phone = Column(String, nullable=True)
+    brand_footer_text = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(
+        DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow
+    )
 
     owner = relationship("User", back_populates="organizations")
     clients = relationship(
         "Client", back_populates="organization", cascade="all, delete-orphan"
+    )
+    memberships = relationship(
+        "OrganizationMembership",
+        back_populates="organization",
+        cascade="all, delete-orphan",
+    )
+
+
+class OrganizationMembership(Base):
+    __tablename__ = "organization_memberships"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    role = Column(String, nullable=False, default="consultant_analyst")
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(
+        DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow
+    )
+
+    organization = relationship("Organization", back_populates="memberships")
+    user = relationship(
+        "User",
+        back_populates="memberships",
+        foreign_keys=[user_id],
     )
 
 
@@ -50,6 +98,16 @@ class Client(Base):
     company_size = Column(String, nullable=True)
     cloud_preference = Column(String, nullable=True)
     compliance_requirements = Column(JSON, nullable=True)
+    # Phase 3 engagement fields
+    business_unit = Column(String, nullable=True)
+    engagement_status = Column(String, nullable=True, default="draft")
+    assigned_consultant_user_id = Column(
+        Integer, ForeignKey("users.id"), nullable=True, index=True
+    )
+    consultant_notes = Column(Text, nullable=True)
+    proposal_package = Column(JSON, nullable=True)
+    sow_package = Column(JSON, nullable=True)
+    fee_estimate = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(
         DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow
@@ -65,7 +123,15 @@ class Assessment(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    organization_id = Column(
+        Integer, ForeignKey("organizations.id"), nullable=True, index=True
+    )
     company_name = Column(String, index=True, nullable=False)
+    business_unit = Column(String, nullable=True)
+    workflow_status = Column(String, nullable=True, default="draft")
+    locked_for_delivery = Column(Integer, default=0)
+    workflow_approved_at = Column(DateTime, nullable=True)
+    workflow_approved_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     industry = Column(String, nullable=True)
     company_size = Column(String, nullable=True)
     departments = Column(JSON, nullable=True)  # List of departments

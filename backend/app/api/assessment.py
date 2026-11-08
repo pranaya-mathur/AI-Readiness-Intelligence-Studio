@@ -10,15 +10,29 @@ from sqlalchemy.orm import Session
 
 from app.agents.graph import AssessmentOrchestrator
 from app.api.auth import get_current_user
-from app.api.clients import get_client_for_user, get_or_create_default_organization
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.rbac import (
+    PERM_ASSESSMENT_APPROVE,
+    PERM_ASSESSMENT_READ,
+    PERM_ASSESSMENT_RUN,
+    PERM_ASSESSMENT_WRITE,
+    PERM_EXPORT_APPROVED,
+    PERM_EXPORT_INTERNAL,
+)
 from app.core.sanitizer import sanitize_text
+from app.services.access_control import (
+    branding_dict,
+    get_accessible_assessment,
+    get_client_for_user,
+    get_or_create_default_organization,
+)
 from app.models import (
     AIUseCase,
     Assessment,
     Client,
     DocumentSignal,
+    Organization,
     ProcessBottleneck,
     RiskRegister,
     RoadmapItem,
@@ -40,7 +54,19 @@ logger = logging.getLogger("AssessmentAPI")
 router = APIRouter()
 
 orchestrator = AssessmentOrchestrator()
+
 VALID_APPROVAL_STATUSES = {"draft", "reviewed", "approved"}
+
+
+def _assert_unlocked(ass: Assessment) -> None:
+    if getattr(ass, "locked_for_delivery", 0):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Assessment is locked for delivery. Reopen via workspace workflow "
+                "with an audit reason before editing."
+            ),
+        )
 
 
 def _assessment_is_client_exportable(ass: Assessment) -> tuple[bool, str]:
@@ -244,6 +270,10 @@ def _db_assessment_to_dict(ass: Assessment) -> dict:
         "model_error": getattr(ass, "model_error", None),
         "evidence_package": getattr(ass, "evidence_package", None),
         "insufficient_evidence": getattr(ass, "insufficient_evidence", 0),
+        "organization_id": getattr(ass, "organization_id", None),
+        "business_unit": getattr(ass, "business_unit", None),
+        "workflow_status": getattr(ass, "workflow_status", None),
+        "locked_for_delivery": getattr(ass, "locked_for_delivery", 0),
     }
 
 
@@ -262,6 +292,12 @@ def create_assessment(
         client = get_client_for_user(db, current_user, payload.client_id)
         if not client:
             raise HTTPException(status_code=404, detail="Client not found")
+        organization = (
+            db.query(Organization)
+            .filter(Organization.id == client.organization_id)
+            .first()
+            or organization
+        )
     else:
         client = (
             db.query(Client)
@@ -286,7 +322,10 @@ def create_assessment(
     ass = Assessment(
         user_id=current_user.id,
         client_id=client.id,
+        organization_id=organization.id,
         company_name=client.name,
+        business_unit=getattr(client, "business_unit", None),
+        workflow_status="discovery",
         industry=payload.industry or client.industry,
         company_size=payload.company_size or client.company_size,
         departments=payload.departments,
@@ -310,9 +349,10 @@ def list_assessments(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    from app.services.access_control import assessments_visible_query
+
     return (
-        db.query(Assessment)
-        .filter(Assessment.user_id == current_user.id)
+        assessments_visible_query(db, current_user)
         .order_by(Assessment.updated_at.desc())
         .all()
     )
@@ -324,13 +364,10 @@ def delete_assessment(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ass = (
-        db.query(Assessment)
-        .filter(Assessment.id == id, Assessment.user_id == current_user.id)
-        .first()
+    ass = get_accessible_assessment(
+        db, current_user, id, permission=PERM_ASSESSMENT_WRITE
     )
-    if not ass:
-        raise HTTPException(status_code=404, detail="Assessment not found")
+    _assert_unlocked(ass)
 
     db.delete(ass)
     db.commit()
@@ -343,14 +380,9 @@ def get_assessment(
     current_user: User = Depends(get_current_user),
 ):
     """Retrieves full assessment with all related details loaded"""
-    ass = (
-        db.query(Assessment)
-        .filter(Assessment.id == id, Assessment.user_id == current_user.id)
-        .first()
+    return get_accessible_assessment(
+        db, current_user, id, permission=PERM_ASSESSMENT_READ
     )
-    if not ass:
-        raise HTTPException(status_code=404, detail="Assessment not found")
-    return ass
 
 
 def _validate_upload_file(upload: UploadFile, content: bytes) -> None:
@@ -416,13 +448,10 @@ def upload_documents(
     current_user: User = Depends(get_current_user),
 ):
     """Parses uploaded files, populates evidence corpus, and executes the LangGraph analysis"""
-    ass = (
-        db.query(Assessment)
-        .filter(Assessment.id == id, Assessment.user_id == current_user.id)
-        .first()
+    ass = get_accessible_assessment(
+        db, current_user, id, permission=PERM_ASSESSMENT_RUN
     )
-    if not ass:
-        raise HTTPException(status_code=404, detail="Assessment not found")
+    _assert_unlocked(ass)
 
     if len(files) > settings.MAX_UPLOAD_FILES:
         raise HTTPException(
@@ -799,13 +828,16 @@ def update_assessment(
     current_user: User = Depends(get_current_user),
 ):
     """Human Review Mode: allows overriding any score or list item manually"""
-    ass = (
-        db.query(Assessment)
-        .filter(Assessment.id == id, Assessment.user_id == current_user.id)
-        .first()
+    ass = get_accessible_assessment(
+        db, current_user, id, permission=PERM_ASSESSMENT_WRITE
     )
-    if not ass:
-        raise HTTPException(status_code=404, detail="Assessment not found")
+    _assert_unlocked(ass)
+    # Approvals require distinct permission
+    update_preview = payload.model_dump(exclude_unset=True)
+    if update_preview.get("approval_status") in {"reviewed", "approved"}:
+        get_accessible_assessment(
+            db, current_user, id, permission=PERM_ASSESSMENT_APPROVE
+        )
 
     # Standard overrides
     update_data = payload.model_dump(exclude_unset=True)
@@ -978,15 +1010,19 @@ def export_assessment_report(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Exports compiled custom formatted PDF, DOCX, or PPTX reports"""
-    ass = (
-        db.query(Assessment)
-        .filter(Assessment.id == id, Assessment.user_id == current_user.id)
-        .first()
+    """Exports compiled custom formatted PDF, DOCX, PPTX, or proposal/SOW reports"""
+    ass = get_accessible_assessment(
+        db, current_user, id, permission=PERM_ASSESSMENT_READ
     )
-    if not ass:
-        raise HTTPException(status_code=404, detail="Assessment not found")
     internal_demo = _is_internal_demo_export(ass, mode)
+    if internal_demo:
+        get_accessible_assessment(
+            db, current_user, id, permission=PERM_EXPORT_INTERNAL
+        )
+    elif (ass.approval_status or "").lower() == "approved":
+        get_accessible_assessment(
+            db, current_user, id, permission=PERM_EXPORT_APPROVED
+        )
     if internal_demo:
         # Clearly marked internal demo path — not a verified client deliverable.
         data = _db_assessment_to_dict(ass)
@@ -1008,6 +1044,55 @@ def export_assessment_report(
         # Serialize DB object to dictionary structure
         data = _db_assessment_to_dict(ass)
         data["export_mode"] = mode
+
+    # Attach workspace branding (never cross-org).
+    if getattr(ass, "organization_id", None):
+        org = db.query(Organization).filter(Organization.id == ass.organization_id).first()
+        if org:
+            data["branding"] = branding_dict(org)
+            data["prepared_by"] = org.brand_display_name or org.name
+
+    if doc_format.lower() in {"proposal", "sow", "proposal-sow"}:
+        from app.services.proposal_sow import build_proposal_and_sow
+        from app.services.investment_persistence import serialize_investment_package
+
+        client = None
+        if ass.client_id:
+            client = db.query(Client).filter(Client.id == ass.client_id).first()
+        if not client:
+            raise HTTPException(status_code=400, detail="Client required for proposal/SOW export")
+        org = None
+        if ass.organization_id:
+            org = db.query(Organization).filter(Organization.id == ass.organization_id).first()
+        package = serialize_investment_package(ass)
+        opportunities = package.get("opportunities") or []
+        selected = next((o for o in opportunities if o.get("pilot_selected")), None)
+        if selected is None and opportunities:
+            selected = next((o for o in opportunities if o.get("ranking") == 1), opportunities[0])
+        proposal = build_proposal_and_sow(
+            organization={"name": (org.name if org else "Workspace"), "id": getattr(org, "id", None)},
+            client={
+                "name": client.name,
+                "industry": client.industry,
+                "business_unit": client.business_unit,
+                "fee_estimate": client.fee_estimate,
+            },
+            assessment=data,
+            opportunity=selected,
+            pilot=package.get("pilot_recommendation") or ass.pilot_plan,
+            fee_estimate=client.fee_estimate,
+            branding=data.get("branding"),
+        )
+        data["proposal_package"] = proposal["proposal_package"]
+        data["sow_package"] = proposal["sow_package"]
+        docx_buffer = DocumentGenerators.generate_proposal_sow_docx(data)
+        return StreamingResponse(
+            docx_buffer,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={
+                "Content-Disposition": f"attachment; filename={ass.company_name.replace(' ', '_')}_Proposal_SOW.docx"
+            },
+        )
 
     if doc_format.lower() == "pdf":
         pdf_buffer = DocumentGenerators.generate_pdf_report(data)
@@ -1079,7 +1164,7 @@ def create_walkthrough_workspace(
     existing_sample = (
         db.query(Assessment)
         .filter(
-            Assessment.user_id == current_user.id,
+            Assessment.organization_id == organization.id,
             Assessment.company_name == "Apex Global Consulting Partners",
         )
         .first()
@@ -1149,6 +1234,8 @@ def create_walkthrough_workspace(
     ass = Assessment(
         user_id=current_user.id,
         client_id=sample_client.id,
+        organization_id=organization.id,
+        workflow_status="assessment_completed",
         company_name="Apex Global Consulting Partners",
         industry="Professional Services",
         company_size="100-500 employees",

@@ -11,7 +11,13 @@ from sqlalchemy.orm import Session
 
 from app.api.auth import get_current_user
 from app.core.database import get_db
+from app.core.rbac import (
+    PERM_ASSESSMENT_READ,
+    PERM_INVESTMENT_APPROVE,
+    PERM_INVESTMENT_WRITE,
+)
 from app.models import Assessment, OpportunityEvaluation, User
+from app.services.access_control import get_accessible_assessment
 from app.services.financial_model import FINANCIAL_MODEL_VERSION, FinancialModelEngine
 from app.services.investment_intelligence import (
     InvestmentIntelligenceEngine,
@@ -53,14 +59,24 @@ class RecalculateRequest(BaseModel):
     allow_illustrative_finance: bool = False
 
 
-def _get_owned_assessment(db: Session, assessment_id: int, user: User) -> Assessment:
-    ass = (
-        db.query(Assessment)
-        .filter(Assessment.id == assessment_id, Assessment.user_id == user.id)
-        .first()
+def _get_owned_assessment(
+    db: Session,
+    assessment_id: int,
+    user: User,
+    *,
+    permission: str = PERM_ASSESSMENT_READ,
+) -> Assessment:
+    ass = get_accessible_assessment(
+        db, user, assessment_id, permission=permission
     )
-    if not ass:
-        raise HTTPException(status_code=404, detail="Assessment not found")
+    if getattr(ass, "locked_for_delivery", 0) and permission != PERM_ASSESSMENT_READ:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Assessment is locked for delivery. Reopen via workspace workflow "
+                "before changing investment inputs."
+            ),
+        )
     return ass
 
 
@@ -70,7 +86,9 @@ def get_investment_intelligence(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ass = _get_owned_assessment(db, assessment_id, current_user)
+    ass = _get_owned_assessment(
+        db, assessment_id, current_user, permission=PERM_ASSESSMENT_READ
+    )
     if not ass.opportunity_evaluations and ass.use_cases:
         build_and_persist_investment_package(db, ass)
         db.commit()
@@ -85,7 +103,9 @@ def recalculate_investment_intelligence(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ass = _get_owned_assessment(db, assessment_id, current_user)
+    ass = _get_owned_assessment(
+        db, assessment_id, current_user, permission=PERM_INVESTMENT_WRITE
+    )
     build_and_persist_investment_package(
         db,
         ass,
@@ -116,7 +136,9 @@ def update_opportunity_financials(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ass = _get_owned_assessment(db, assessment_id, current_user)
+    ass = _get_owned_assessment(
+        db, assessment_id, current_user, permission=PERM_INVESTMENT_WRITE
+    )
     row = (
         db.query(OpportunityEvaluation)
         .filter(
@@ -180,7 +202,9 @@ def override_opportunity_criteria(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ass = _get_owned_assessment(db, assessment_id, current_user)
+    ass = _get_owned_assessment(
+        db, assessment_id, current_user, permission=PERM_INVESTMENT_WRITE
+    )
     row = (
         db.query(OpportunityEvaluation)
         .filter(
@@ -308,7 +332,9 @@ def override_pilot_recommendation(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ass = _get_owned_assessment(db, assessment_id, current_user)
+    ass = _get_owned_assessment(
+        db, assessment_id, current_user, permission=PERM_INVESTMENT_WRITE
+    )
     row = (
         db.query(OpportunityEvaluation)
         .filter(
@@ -372,7 +398,9 @@ def record_investment_decision(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ass = _get_owned_assessment(db, assessment_id, current_user)
+    ass = _get_owned_assessment(
+        db, assessment_id, current_user, permission=PERM_INVESTMENT_APPROVE
+    )
     allowed = {
         "invest",
         "validate_first",
