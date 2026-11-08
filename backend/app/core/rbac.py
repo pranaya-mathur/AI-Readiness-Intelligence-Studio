@@ -85,15 +85,15 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         PERM_EXPORT_APPROVED,
         PERM_VIEW_CONSULTANT_NOTES,
     },
+    # Reviewers may approve assessment/investment decisions but cannot freely
+    # edit assessment content, recalculate packages, or rewrite proposals.
     ROLE_REVIEWER_APPROVER: {
         PERM_ASSESSMENT_READ,
-        PERM_INVESTMENT_WRITE,
         PERM_INVESTMENT_APPROVE,
         PERM_ASSESSMENT_APPROVE,
         PERM_EXPORT_APPROVED,
         PERM_EXPORT_INTERNAL,
         PERM_VIEW_CONSULTANT_NOTES,
-        PERM_PROPOSAL_WRITE,
     },
     ROLE_CLIENT_VIEWER: {
         PERM_ASSESSMENT_READ,

@@ -1,15 +1,20 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.auth import get_current_user
 from app.core.database import get_db
-from app.core.rbac import PERM_ASSESSMENT_READ, PERM_CLIENT_MANAGE, WORKFLOW_DRAFT
+from app.core.rbac import (
+    PERM_ASSESSMENT_READ,
+    PERM_CLIENT_MANAGE,
+    ROLE_CLIENT_VIEWER,
+    WORKFLOW_DRAFT,
+)
 from app.models import Assessment, Client, User
 from app.schemas.assessment import ClientCreate, ClientResponse
 from app.services.access_control import (
+    authorized_client_id_set,
     get_client_for_user,
     get_or_create_default_organization,
     require_org_permission,
@@ -31,7 +36,6 @@ class ClientResponsePhase3(ClientResponse):
     assigned_consultant_user_id: int | None = None
 
 
-# Re-export helpers used by assessment.py for backward compatibility.
 __all__ = [
     "router",
     "get_or_create_default_organization",
@@ -49,13 +53,20 @@ def list_clients(
         organization = get_or_create_default_organization(db, current_user)
         organization_id = organization.id
         db.commit()
-    require_org_permission(db, current_user, organization_id, PERM_ASSESSMENT_READ)
-    clients = (
-        db.query(Client)
-        .filter(Client.organization_id == organization_id)
-        .order_by(Client.updated_at.desc(), Client.name.asc())
-        .all()
+    _org, membership = require_org_permission(
+        db, current_user, organization_id, PERM_ASSESSMENT_READ
     )
+    query = db.query(Client).filter(Client.organization_id == organization_id)
+    if membership.role == ROLE_CLIENT_VIEWER:
+        allowed = authorized_client_id_set(membership) or set()
+        if not allowed:
+            return []
+        query = query.filter(Client.id.in_(list(allowed)))
+    clients = query.order_by(Client.updated_at.desc(), Client.name.asc()).all()
+    # Never expose consultant notes to client viewers via client list payloads.
+    if membership.role == ROLE_CLIENT_VIEWER:
+        for client in clients:
+            client.consultant_notes = None
     return clients
 
 
@@ -73,6 +84,7 @@ def create_client(
         )
     else:
         organization = get_or_create_default_organization(db, current_user)
+        require_org_permission(db, current_user, organization.id, PERM_CLIENT_MANAGE)
 
     existing = (
         db.query(Client)

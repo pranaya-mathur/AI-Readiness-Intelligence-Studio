@@ -17,15 +17,24 @@ from app.core.rbac import (
     PERM_ASSESSMENT_READ,
     PERM_ASSESSMENT_RUN,
     PERM_ASSESSMENT_WRITE,
+    PERM_CLIENT_MANAGE,
     PERM_EXPORT_APPROVED,
     PERM_EXPORT_INTERNAL,
+    ROLE_CLIENT_VIEWER,
 )
 from app.core.sanitizer import sanitize_text
 from app.services.access_control import (
     branding_dict,
     get_accessible_assessment,
     get_client_for_user,
+    get_membership,
     get_or_create_default_organization,
+    require_org_permission,
+)
+from app.services.approval_gates import (
+    VALID_APPROVAL_STATUSES as GATE_APPROVAL_STATUSES,
+    assert_assessment_approvable,
+    assessment_is_client_exportable,
 )
 from app.models import (
     AIUseCase,
@@ -55,7 +64,7 @@ router = APIRouter()
 
 orchestrator = AssessmentOrchestrator()
 
-VALID_APPROVAL_STATUSES = {"draft", "reviewed", "approved"}
+VALID_APPROVAL_STATUSES = GATE_APPROVAL_STATUSES
 
 
 def _assert_unlocked(ass: Assessment) -> None:
@@ -70,25 +79,27 @@ def _assert_unlocked(ass: Assessment) -> None:
 
 
 def _assessment_is_client_exportable(ass: Assessment) -> tuple[bool, str]:
-    """Real client exports require a completed, non-demo, non-simulated analysis."""
-    status = (ass.status or "").lower()
-    if status in {"incomplete", "failed", "processing", "intake", "uploading"}:
-        return (
-            False,
-            f"Assessment status '{status}' is not exportable as a verified client report",
-        )
-    analysis_mode = (getattr(ass, "analysis_mode", None) or "").lower()
-    model_status = (getattr(ass, "model_run_status", None) or "").lower()
-    if analysis_mode == "demo" or model_status == "demo_simulated":
-        return (
-            False,
-            "Demo/simulated analysis cannot be exported as a verified client assessment",
-        )
-    if getattr(ass, "insufficient_evidence", 0):
-        # Still allow export after human approval only if not incomplete/demo;
-        # insufficient evidence alone is a warning, not a hard block once reviewed.
-        pass
-    return True, ""
+    return assessment_is_client_exportable(ass)
+
+
+def _strip_viewer_fields(ass: Assessment, db: Session, user: User) -> Assessment:
+    if not ass.organization_id:
+        return ass
+    membership = get_membership(db, user, ass.organization_id)
+    if membership and membership.role == ROLE_CLIENT_VIEWER:
+        # Eager-load relationships before detaching so response serialization works.
+        for rel in (
+            "bottlenecks",
+            "use_cases",
+            "risks",
+            "roadmap_items",
+            "extracted_signals",
+            "client",
+        ):
+            getattr(ass, rel, None)
+        ass.reviewer_notes = None
+        db.expunge(ass)
+    return ass
 
 
 def _is_internal_demo_export(ass: Assessment, mode: str | None) -> bool:
@@ -289,7 +300,9 @@ def create_assessment(
     client = None
 
     if payload.client_id is not None:
-        client = get_client_for_user(db, current_user, payload.client_id)
+        client = get_client_for_user(
+            db, current_user, payload.client_id, permission=PERM_CLIENT_MANAGE
+        )
         if not client:
             raise HTTPException(status_code=404, detail="Client not found")
         organization = (
@@ -298,7 +311,13 @@ def create_assessment(
             .first()
             or organization
         )
+        require_org_permission(
+            db, current_user, organization.id, PERM_ASSESSMENT_WRITE
+        )
     else:
+        require_org_permission(
+            db, current_user, organization.id, PERM_ASSESSMENT_WRITE
+        )
         client = (
             db.query(Client)
             .filter(
@@ -308,6 +327,9 @@ def create_assessment(
             .first()
         )
         if not client:
+            require_org_permission(
+                db, current_user, organization.id, PERM_CLIENT_MANAGE
+            )
             client = Client(
                 organization_id=organization.id,
                 name=payload.company_name,
@@ -351,11 +373,12 @@ def list_assessments(
 ):
     from app.services.access_control import assessments_visible_query
 
-    return (
+    rows = (
         assessments_visible_query(db, current_user)
         .order_by(Assessment.updated_at.desc())
         .all()
     )
+    return [_strip_viewer_fields(ass, db, current_user) for ass in rows]
 
 
 @router.delete("/{id}", status_code=204)
@@ -380,9 +403,10 @@ def get_assessment(
     current_user: User = Depends(get_current_user),
 ):
     """Retrieves full assessment with all related details loaded"""
-    return get_accessible_assessment(
+    ass = get_accessible_assessment(
         db, current_user, id, permission=PERM_ASSESSMENT_READ
     )
+    return _strip_viewer_fields(ass, db, current_user)
 
 
 def _validate_upload_file(upload: UploadFile, content: bytes) -> None:
@@ -828,19 +852,25 @@ def update_assessment(
     current_user: User = Depends(get_current_user),
 ):
     """Human Review Mode: allows overriding any score or list item manually"""
-    ass = get_accessible_assessment(
-        db, current_user, id, permission=PERM_ASSESSMENT_WRITE
-    )
-    _assert_unlocked(ass)
-    # Approvals require distinct permission
     update_preview = payload.model_dump(exclude_unset=True)
-    if update_preview.get("approval_status") in {"reviewed", "approved"}:
-        get_accessible_assessment(
+    approval_only_keys = {"approval_status", "reviewer_notes"}
+    if update_preview and set(update_preview.keys()) <= approval_only_keys:
+        # Designated reviewers may approve / annotate without full edit rights.
+        ass = get_accessible_assessment(
             db, current_user, id, permission=PERM_ASSESSMENT_APPROVE
         )
+    else:
+        ass = get_accessible_assessment(
+            db, current_user, id, permission=PERM_ASSESSMENT_WRITE
+        )
+        if update_preview.get("approval_status") in {"reviewed", "approved"}:
+            get_accessible_assessment(
+                db, current_user, id, permission=PERM_ASSESSMENT_APPROVE
+            )
+    _assert_unlocked(ass)
 
     # Standard overrides
-    update_data = payload.model_dump(exclude_unset=True)
+    update_data = update_preview
 
     # Pop nested items to handle separately
     use_cases = update_data.pop("use_cases", None)
@@ -853,7 +883,9 @@ def update_assessment(
             if value is None:
                 ass.client_id = None
                 continue
-            client = get_client_for_user(db, current_user, value)
+            client = get_client_for_user(
+                db, current_user, value, permission=PERM_CLIENT_MANAGE
+            )
             if not client:
                 raise HTTPException(status_code=404, detail="Client not found")
             ass.client_id = client.id
@@ -866,32 +898,10 @@ def update_assessment(
         ):
             raise HTTPException(status_code=400, detail="Invalid approval status")
         if key == "approval_status" and value in {"reviewed", "approved"}:
-            exportable, _reason = _assessment_is_client_exportable(ass)
-            # Demo/simulated/incomplete cannot be promoted as verified client assessments.
-            if (
-                not exportable
-                and (getattr(ass, "analysis_mode", "") or "").lower() == "demo"
-            ):
-                raise HTTPException(
-                    status_code=409,
-                    detail=(
-                        "Demo/simulated assessments cannot be approved as verified "
-                        "client deliverables. Use internal demo export mode instead."
-                    ),
-                )
-            if (ass.status or "").lower() in {"incomplete", "failed"}:
-                raise HTTPException(
-                    status_code=409,
-                    detail=(
-                        f"Cannot approve an assessment with status '{ass.status}'. "
-                        "Re-run analysis successfully first."
-                    ),
-                )
-            if (getattr(ass, "model_run_status", "") or "").lower() == "demo_simulated":
-                raise HTTPException(
-                    status_code=409,
-                    detail="Simulated model output cannot be approved as verified analysis.",
-                )
+            assert_assessment_approvable(ass, target_status=value)
+        if key == "client_id" and value is not None:
+            # Already handled above; keep for safety.
+            pass
         setattr(ass, key, value)
 
     # Update Use Cases if provided
@@ -1064,27 +1074,38 @@ def export_assessment_report(
         org = None
         if ass.organization_id:
             org = db.query(Organization).filter(Organization.id == ass.organization_id).first()
-        package = serialize_investment_package(ass)
-        opportunities = package.get("opportunities") or []
-        selected = next((o for o in opportunities if o.get("pilot_selected")), None)
-        if selected is None and opportunities:
-            selected = next((o for o in opportunities if o.get("ranking") == 1), opportunities[0])
-        proposal = build_proposal_and_sow(
-            organization={"name": (org.name if org else "Workspace"), "id": getattr(org, "id", None)},
-            client={
-                "name": client.name,
-                "industry": client.industry,
-                "business_unit": client.business_unit,
-                "fee_estimate": client.fee_estimate,
-            },
-            assessment=data,
-            opportunity=selected,
-            pilot=package.get("pilot_recommendation") or ass.pilot_plan,
-            fee_estimate=client.fee_estimate,
-            branding=data.get("branding"),
-        )
-        data["proposal_package"] = proposal["proposal_package"]
-        data["sow_package"] = proposal["sow_package"]
+        # Prefer assessment-bound packages so sibling engagements stay isolated.
+        if getattr(ass, "proposal_package", None) and getattr(ass, "sow_package", None):
+            data["proposal_package"] = ass.proposal_package
+            data["sow_package"] = ass.sow_package
+        else:
+            package = serialize_investment_package(ass)
+            opportunities = package.get("opportunities") or []
+            selected = next((o for o in opportunities if o.get("pilot_selected")), None)
+            if selected is None and opportunities:
+                selected = next(
+                    (o for o in opportunities if o.get("ranking") == 1), opportunities[0]
+                )
+            fee = getattr(ass, "fee_estimate", None) or client.fee_estimate
+            proposal = build_proposal_and_sow(
+                organization={
+                    "name": (org.name if org else "Workspace"),
+                    "id": getattr(org, "id", None),
+                },
+                client={
+                    "name": client.name,
+                    "industry": client.industry,
+                    "business_unit": client.business_unit,
+                    "fee_estimate": fee,
+                },
+                assessment=data,
+                opportunity=selected,
+                pilot=package.get("pilot_recommendation") or ass.pilot_plan,
+                fee_estimate=fee,
+                branding=data.get("branding"),
+            )
+            data["proposal_package"] = proposal["proposal_package"]
+            data["sow_package"] = proposal["sow_package"]
         docx_buffer = DocumentGenerators.generate_proposal_sow_docx(data)
         return StreamingResponse(
             docx_buffer,

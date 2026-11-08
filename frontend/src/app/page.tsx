@@ -543,7 +543,7 @@ export default function Home() {
     } catch (err) {
       console.error(err);
     }
-  }, [token]);
+  }, [token, getAuthHeaders]);
 
   const loadWorkspaceViews = useCallback(async (workspaceId: number) => {
     try {
@@ -562,7 +562,7 @@ export default function Home() {
     } catch (err) {
       console.error(err);
     }
-  }, []);
+  }, [getAuthHeaders]);
 
   const loadProposalSow = useCallback(async (assessmentId: number) => {
     try {
@@ -577,7 +577,7 @@ export default function Home() {
     } catch {
       setProposalSow(null);
     }
-  }, []);
+  }, [getAuthHeaders]);
 
   const handleGenerateProposalSow = async (feeEstimate: Record<string, unknown>) => {
     if (!selectedAssessment) return;
@@ -905,7 +905,7 @@ export default function Home() {
     } finally {
       setInvestmentBusy(false);
     }
-  }, [token]);
+  }, [getAuthHeaders]);
 
   useEffect(() => {
     if (insightsSubTab === "investment" && selectedAssessment?.id) {
@@ -3688,10 +3688,10 @@ export default function Home() {
 
               {insightsSubTab === "workflow" && (
                 <ReviewApprovalPanel
-                  workflowStatus={(selectedAssessment as any)?.workflow_status}
+                  workflowStatus={selectedAssessment?.workflow_status}
                   approvalStatus={selectedAssessment?.approval_status}
                   investmentStatus={selectedAssessment?.investment_decision_status}
-                  locked={Boolean((selectedAssessment as any)?.locked_for_delivery)}
+                  locked={Boolean(selectedAssessment?.locked_for_delivery)}
                   busy={workspaceBusy}
                   onWorkflowChange={handleWorkflowUpdate}
                 />

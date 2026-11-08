@@ -28,6 +28,7 @@ from app.services.investment_persistence import (
     record_review_event,
     serialize_investment_package,
 )
+from app.services.approval_gates import assert_investment_decision_allowed
 from app.services.prioritization import PrioritizationEngine
 
 router = APIRouter()
@@ -401,17 +402,7 @@ def record_investment_decision(
     ass = _get_owned_assessment(
         db, assessment_id, current_user, permission=PERM_INVESTMENT_APPROVE
     )
-    allowed = {
-        "invest",
-        "validate_first",
-        "defer",
-        "not_recommended",
-        "pending_review",
-    }
-    if payload.status not in allowed:
-        raise HTTPException(
-            status_code=400, detail=f"Invalid status. Use one of {sorted(allowed)}"
-        )
+    assert_investment_decision_allowed(payload.status)
 
     previous = {
         "status": ass.investment_decision_status,

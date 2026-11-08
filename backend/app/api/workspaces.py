@@ -21,6 +21,7 @@ from app.core.rbac import (
     PERM_ORG_MANAGE,
     PERM_PROPOSAL_WRITE,
     PERM_VIEW_CONSULTANT_NOTES,
+    ROLE_CLIENT_VIEWER,
     WORKFLOW_STATUSES,
     WORKSPACE_TYPES,
     has_permission,
@@ -28,7 +29,6 @@ from app.core.rbac import (
 from app.models import (
     Assessment,
     Client,
-    OpportunityEvaluation,
     Organization,
     OrganizationMembership,
     User,
@@ -36,13 +36,15 @@ from app.models import (
 from app.services.access_control import (
     assert_valid_role,
     branding_dict,
+    client_is_authorized_for_membership,
     get_accessible_assessment,
     get_client_for_user,
     get_membership,
-    get_or_create_default_organization,
     list_user_organizations,
     require_org_permission,
+    validate_authorized_clients,
 )
+from app.services.approval_gates import assert_workflow_transition
 from app.services.investment_persistence import serialize_investment_package
 from app.services.proposal_sow import build_proposal_and_sow
 
@@ -72,10 +74,12 @@ class MemberCreate(BaseModel):
         default=None,
         description="Optional password if creating a new user account",
     )
+    authorized_client_ids: list[int] | None = None
 
 
 class MemberRoleUpdate(BaseModel):
     role: str
+    authorized_client_ids: list[int] | None = None
 
 
 class EngagementUpdate(BaseModel):
@@ -188,6 +192,7 @@ def list_members(
             "email": u.email,
             "full_name": u.full_name,
             "role": m.role,
+            "authorized_client_ids": m.authorized_client_ids,
         }
         for m, u in rows
     ]
@@ -219,12 +224,23 @@ def add_member(
     existing = get_membership(db, user, organization_id)
     if existing:
         raise HTTPException(status_code=400, detail="User is already a member")
+    authorized = validate_authorized_clients(
+        db, organization_id, payload.authorized_client_ids, role
+    )
     membership = OrganizationMembership(
-        organization_id=organization_id, user_id=user.id, role=role
+        organization_id=organization_id,
+        user_id=user.id,
+        role=role,
+        authorized_client_ids=authorized,
     )
     db.add(membership)
     db.commit()
-    return {"user_id": user.id, "email": user.email, "role": role}
+    return {
+        "user_id": user.id,
+        "email": user.email,
+        "role": role,
+        "authorized_client_ids": authorized,
+    }
 
 
 @router.put("/{organization_id}/members/{user_id}")
@@ -248,8 +264,23 @@ def update_member_role(
     if not membership:
         raise HTTPException(status_code=404, detail="Membership not found")
     membership.role = role
+    if payload.authorized_client_ids is not None or role == ROLE_CLIENT_VIEWER:
+        membership.authorized_client_ids = validate_authorized_clients(
+            db,
+            organization_id,
+            payload.authorized_client_ids
+            if payload.authorized_client_ids is not None
+            else membership.authorized_client_ids,
+            role,
+        )
+    elif role != ROLE_CLIENT_VIEWER:
+        membership.authorized_client_ids = None
     db.commit()
-    return {"user_id": user_id, "role": role}
+    return {
+        "user_id": user_id,
+        "role": role,
+        "authorized_client_ids": membership.authorized_client_ids,
+    }
 
 
 @router.get("/{organization_id}/portfolio")
@@ -268,8 +299,13 @@ def enterprise_portfolio(
     assessments = query.order_by(Assessment.updated_at.desc()).all()
     items = []
     for ass in assessments:
-        if membership.role == "client_viewer" and (ass.approval_status or "") != "approved":
-            continue
+        if membership.role == ROLE_CLIENT_VIEWER:
+            if not client_is_authorized_for_membership(membership, ass.client_id):
+                continue
+            from app.services.access_control import assessment_is_client_viewer_visible
+
+            if not assessment_is_client_viewer_visible(ass):
+                continue
         items.append(
             {
                 "assessment_id": ass.id,
@@ -316,6 +352,10 @@ def agency_engagements(
     can_notes = has_permission(membership.role, PERM_VIEW_CONSULTANT_NOTES)
     rows = []
     for client in clients:
+        if membership.role == ROLE_CLIENT_VIEWER and not client_is_authorized_for_membership(
+            membership, client.id
+        ):
+            continue
         assessment_count = (
             db.query(Assessment).filter(Assessment.client_id == client.id).count()
         )
@@ -400,6 +440,13 @@ def update_assessment_workflow(
     ass = get_accessible_assessment(
         db, current_user, assessment_id, permission=permission
     )
+    # Approval prerequisites apply before status mutation (including reopen targets).
+    if not (
+        ass.locked_for_delivery
+        and payload.reason
+        and payload.workflow_status not in {"approved", "delivered"}
+    ):
+        assert_workflow_transition(ass, payload.workflow_status)
     if ass.locked_for_delivery and payload.workflow_status != "delivered":
         # Allow reopen only with approve permission and explicit reason.
         if not payload.reason:
@@ -418,8 +465,12 @@ def update_assessment_workflow(
         ass.workflow_approved_at = datetime.datetime.utcnow()
         ass.workflow_approved_by_user_id = current_user.id
         ass.locked_for_delivery = 1
+        ass.proposal_locked = 1
+        if ass.proposal_package and not ass.proposal_approved_at:
+            ass.proposal_approved_at = datetime.datetime.utcnow()
     if payload.workflow_status == "delivered":
         ass.locked_for_delivery = 1
+        ass.proposal_locked = 1
     if ass.client_id:
         client = db.query(Client).filter(Client.id == ass.client_id).first()
         if client:
@@ -458,8 +509,32 @@ def generate_proposal_sow(
     if not client:
         raise HTTPException(status_code=400, detail="Client engagement required for proposal/SOW")
 
+    workflow = (ass.workflow_status or "").lower()
+    deliverable_locked = bool(getattr(ass, "proposal_locked", 0)) or workflow in {
+        "approved",
+        "delivered",
+    }
+    if deliverable_locked:
+        if not (payload and payload.reason):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Approved proposal/SOW is locked for this assessment. "
+                    "Provide a reason to reopen before regenerating."
+                ),
+            )
+        get_accessible_assessment(
+            db, current_user, assessment_id, permission=PERM_ASSESSMENT_APPROVE
+        )
+        ass.proposal_locked = 0
+
+    fee_estimate = (
+        payload.fee_estimate
+        if payload and payload.fee_estimate is not None
+        else getattr(ass, "fee_estimate", None)
+    )
     if payload and payload.fee_estimate is not None:
-        client.fee_estimate = payload.fee_estimate
+        ass.fee_estimate = payload.fee_estimate
 
     package = serialize_investment_package(ass)
     opportunities = package.get("opportunities") or []
@@ -478,9 +553,10 @@ def generate_proposal_sow(
             "name": client.name,
             "industry": client.industry,
             "business_unit": client.business_unit,
-            "fee_estimate": client.fee_estimate,
+            "fee_estimate": fee_estimate,
         },
         assessment={
+            "id": ass.id,
             "company_name": ass.company_name,
             "industry": ass.industry,
             "business_unit": ass.business_unit,
@@ -496,16 +572,39 @@ def generate_proposal_sow(
         },
         opportunity=selected,
         pilot=package.get("pilot_recommendation") or ass.pilot_plan,
-        fee_estimate=client.fee_estimate,
+        fee_estimate=fee_estimate,
         branding=branding_dict(org),
     )
-    client.proposal_package = result["proposal_package"]
-    client.sow_package = result["sow_package"]
-    if ass.workflow_status not in {"delivered"}:
+    proposal = dict(result["proposal_package"])
+    sow = dict(result["sow_package"])
+    proposal["assessment_id"] = ass.id
+    proposal["client_id"] = client.id
+    sow["assessment_id"] = ass.id
+    sow["client_id"] = client.id
+    ass.proposal_package = proposal
+    ass.sow_package = sow
+    if ass.workflow_status not in {"delivered", "approved"}:
+        # Proposal prepared is gated by shared approval rules.
+        assert_workflow_transition(ass, "proposal_prepared")
         ass.workflow_status = "proposal_prepared"
         client.engagement_status = "proposal_prepared"
+    # Lock only after client-facing approval/delivery workflow — drafts remain editable.
+    if (ass.workflow_status or "").lower() in {"approved", "delivered"}:
+        ass.proposal_locked = 1
+        ass.proposal_approved_at = datetime.datetime.utcnow()
+    else:
+        ass.proposal_locked = 0
     db.commit()
-    return result
+    return {
+        "proposal_package": ass.proposal_package,
+        "sow_package": ass.sow_package,
+        "fee_estimate": ass.fee_estimate,
+        "assessment_id": ass.id,
+        "client_id": client.id,
+        "proposal_locked": bool(ass.proposal_locked),
+        "complete": result.get("complete"),
+        "missing_information": result.get("missing_information"),
+    }
 
 
 @router.get("/assessments/{assessment_id}/proposal-sow")
@@ -522,9 +621,43 @@ def get_proposal_sow(
     client = db.query(Client).filter(Client.id == ass.client_id).first()
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
+
+    proposal = getattr(ass, "proposal_package", None)
+    sow = getattr(ass, "sow_package", None)
+    fee = getattr(ass, "fee_estimate", None)
+
+    # Backward-compatible legacy fallback: use client packages only when they
+    # are explicitly bound to this assessment_id (or only one assessment exists).
+    if not proposal and client.proposal_package:
+        legacy = client.proposal_package
+        bound_id = legacy.get("assessment_id") if isinstance(legacy, dict) else None
+        sibling_count = (
+            db.query(Assessment).filter(Assessment.client_id == client.id).count()
+        )
+        if bound_id == ass.id or (bound_id is None and sibling_count == 1):
+            proposal = legacy
+            sow = client.sow_package
+            fee = fee or client.fee_estimate
+            # Soft migrate onto assessment without touching other assessments.
+            if not getattr(ass, "proposal_package", None):
+                if isinstance(proposal, dict):
+                    proposal = dict(proposal)
+                    proposal["assessment_id"] = ass.id
+                if isinstance(sow, dict):
+                    sow = dict(sow)
+                    sow["assessment_id"] = ass.id
+                ass.proposal_package = proposal
+                ass.sow_package = sow
+                if fee is not None:
+                    ass.fee_estimate = fee
+                db.commit()
+
     return {
-        "proposal_package": client.proposal_package,
-        "sow_package": client.sow_package,
-        "fee_estimate": client.fee_estimate,
-        "complete": bool(client.proposal_package and client.sow_package),
+        "proposal_package": proposal,
+        "sow_package": sow,
+        "fee_estimate": fee,
+        "assessment_id": ass.id,
+        "client_id": client.id,
+        "proposal_locked": bool(getattr(ass, "proposal_locked", 0)),
+        "complete": bool(proposal and sow),
     }

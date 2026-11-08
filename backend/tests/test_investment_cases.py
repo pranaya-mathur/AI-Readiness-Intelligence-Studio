@@ -2,7 +2,6 @@
 
 from app.services.feasibility import TechnicalFeasibilityEngine
 from app.services.investment_intelligence import InvestmentIntelligenceEngine
-from app.services.prioritization import PrioritizationEngine
 
 
 MANUFACTURING_CTX = {

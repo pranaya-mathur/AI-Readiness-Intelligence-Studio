@@ -191,6 +191,11 @@ def ensure_runtime_schema():
         "locked_for_delivery": "ALTER TABLE assessments ADD COLUMN locked_for_delivery INTEGER DEFAULT 0",
         "workflow_approved_at": "ALTER TABLE assessments ADD COLUMN workflow_approved_at DATETIME",
         "workflow_approved_by_user_id": "ALTER TABLE assessments ADD COLUMN workflow_approved_by_user_id INTEGER",
+        "proposal_package": "ALTER TABLE assessments ADD COLUMN proposal_package JSON",
+        "sow_package": "ALTER TABLE assessments ADD COLUMN sow_package JSON",
+        "fee_estimate": "ALTER TABLE assessments ADD COLUMN fee_estimate JSON",
+        "proposal_locked": "ALTER TABLE assessments ADD COLUMN proposal_locked INTEGER DEFAULT 0",
+        "proposal_approved_at": "ALTER TABLE assessments ADD COLUMN proposal_approved_at DATETIME",
     }
     for column_name, ddl in phase3_assessment_columns.items():
         if column_name not in assessment_columns:
@@ -241,3 +246,20 @@ def ensure_runtime_schema():
             logger.info("Adding missing users.full_name column...")
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE users ADD COLUMN full_name VARCHAR"))
+
+    if "organization_memberships" in inspector.get_table_names():
+        membership_columns = {
+            column["name"]
+            for column in inspector.get_columns("organization_memberships")
+        }
+        if "authorized_client_ids" not in membership_columns:
+            logger.info(
+                "Adding missing organization_memberships.authorized_client_ids column..."
+            )
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE organization_memberships "
+                        "ADD COLUMN authorized_client_ids JSON"
+                    )
+                )

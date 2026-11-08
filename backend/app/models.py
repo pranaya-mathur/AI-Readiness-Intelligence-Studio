@@ -73,6 +73,9 @@ class OrganizationMembership(Base):
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     role = Column(String, nullable=False, default="consultant_analyst")
+    # Client viewers must be scoped to explicit client engagement IDs.
+    # Null/empty for internal roles means organization-wide access.
+    authorized_client_ids = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(
         DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow
@@ -132,6 +135,12 @@ class Assessment(Base):
     locked_for_delivery = Column(Integer, default=0)
     workflow_approved_at = Column(DateTime, nullable=True)
     workflow_approved_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    # Proposal/SOW bound to this assessment (not shared across sibling engagements).
+    proposal_package = Column(JSON, nullable=True)
+    sow_package = Column(JSON, nullable=True)
+    fee_estimate = Column(JSON, nullable=True)
+    proposal_locked = Column(Integer, default=0)
+    proposal_approved_at = Column(DateTime, nullable=True)
     industry = Column(String, nullable=True)
     company_size = Column(String, nullable=True)
     departments = Column(JSON, nullable=True)  # List of departments

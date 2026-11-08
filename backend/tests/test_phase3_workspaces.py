@@ -10,7 +10,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.api.auth import get_password_hash
 from app.core.database import Base, get_db
 from app.core.rbac import (
     ROLE_CLIENT_VIEWER,
@@ -22,10 +21,6 @@ from app.core.rbac import (
 from app.main import app
 from app.models import (
     Assessment,
-    Client,
-    Organization,
-    OrganizationMembership,
-    User,
 )
 from app.services.proposal_sow import build_proposal_and_sow
 from app.services.document_generators import DocumentGenerators
@@ -288,8 +283,8 @@ def test_org_isolation_and_workspace_journeys(client, db_session):
     )
     assert row is not None
     row.status = "completed"
-    row.analysis_mode = "demo"
-    row.model_run_status = "demo_simulated"
+    row.analysis_mode = "real"
+    row.model_run_status = "success"
     row.approval_status = "approved"
     row.client_summary = "[DEMO] Logistics exception triage opportunity."
     row.recommended_first_pilot = "Exception Triage Assistant"
@@ -360,6 +355,7 @@ def test_org_isolation_and_workspace_journeys(client, db_session):
             "role": "client_viewer",
             "full_name": "Client Viewer",
             "temporary_password": "Phase3Demo!23",
+            "authorized_client_ids": [agency_client["id"]],
         },
     )
     assert membership.status_code in {200, 201}, membership.text
